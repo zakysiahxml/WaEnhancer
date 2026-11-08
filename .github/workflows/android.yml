@@ -1,4 +1,6 @@
 # Build debug APK saat push — untuk fork WaEnhancer (Ajen).
+# v2: tanpa android-actions/setup-android (gagal di run #1) — pakai SDK
+# bawaan runner ubuntu-latest + sdkmanager untuk paket yang kurang.
 # Build memakai JDK 21 mengikuti CI upstream (build-whatsapp.yml):
 # project menarget Java 17, tapi AGP 9.3 mencatat lint bisa crash di JDK 17
 # dan CI upstream sendiri memakai Temurin 21.
@@ -28,11 +30,9 @@ jobs:
             gradle/libs.versions.toml
             **/gradle.properties
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
       - name: Install SDK packages (platform 37, build-tools, NDK 28.2, CMake 3.22.1)
         run: |
+          yes | sdkmanager --licenses >/dev/null
           sdkmanager "platforms;android-37" "build-tools;35.0.0" "build-tools;36.0.0" "ndk;28.2.13676358" "cmake;3.22.1"
 
       - name: Grant execute permission for gradlew
