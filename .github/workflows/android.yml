@@ -1,8 +1,9 @@
 # Build debug APK saat push — untuk fork WaEnhancer (Ajen).
-# v3: sdkmanager via path lengkap $ANDROID_HOME/cmdline-tools/latest/bin/
-# (run #2 gagal exit 127: sdkmanager tidak ada di PATH runner).
-# v2: tanpa android-actions/setup-android (gagal di run #1) — pakai SDK
-# bawaan runner ubuntu-latest + sdkmanager untuk paket yang kurang.
+# v4: TANPA langkah install SDK — meniru persis CI upstream
+# (build-whatsapp.yml): checkout -> JDK 21 -> chmod -> gradlew.
+# Upstream membuktikan SDK bawaan runner ubuntu-latest sudah cukup;
+# langkah sdkmanager-ku yang gagal terus (run #2 exit 127, run #3
+# gagal lagi di step yang sama) ternyata tidak dibutuhkan.
 # Build memakai JDK 21 mengikuti CI upstream (build-whatsapp.yml):
 # project menarget Java 17, tapi AGP 9.3 mencatat lint bisa crash di JDK 17
 # dan CI upstream sendiri memakai Temurin 21.
@@ -31,12 +32,6 @@ jobs:
             **/gradle-wrapper.properties
             gradle/libs.versions.toml
             **/gradle.properties
-
-      - name: Install SDK packages (platform 37, build-tools, NDK 28.2, CMake 3.22.1)
-        run: |
-          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
-          yes | "$SDKMANAGER" --licenses >/dev/null
-          "$SDKMANAGER" "platforms;android-37" "build-tools;35.0.0" "build-tools;36.0.0" "ndk;28.2.13676358" "cmake;3.22.1"
 
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew
