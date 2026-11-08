@@ -14,6 +14,7 @@ import com.wmods.wppenhacer.xposed.features.customization.HideTabs
 import com.wmods.wppenhacer.xposed.features.customization.IGStatus
 import com.wmods.wppenhacer.xposed.features.customization.SeparateGroup
 import com.wmods.wppenhacer.xposed.features.customization.ShowOnline
+import com.wmods.wppenhacer.xposed.features.customization.StatusBarGradient
 import com.wmods.wppenhacer.xposed.features.general.AboutContactPicker
 import com.wmods.wppenhacer.xposed.features.general.AntiRevoke
 import com.wmods.wppenhacer.xposed.features.general.CallType
@@ -90,6 +91,7 @@ internal object FeatureRegistry {
         ChatLimit::class.java,
         SeparateGroup::class.java,
         ShowOnline::class.java,
+        StatusBarGradient::class.java,
         DndMode::class.java,
         FreezeLastSeen::class.java,
         TypingPrivacy::class.java,

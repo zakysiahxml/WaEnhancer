@@ -76,6 +76,10 @@
     <string name="show_online_dot_in_conversation_list">Show Online Dot in Conversation List</string>
     <string name="show_online_dot_in_conversation_list_sum">Show a green online dot on home screen\n(NOTE: Must activate show online for everyone in WhatsApp\'s Privacy Settings menu)</string>
     <string name="show_dnd_button">Show DND Button</string>
+    <string name="statusbar_gradient">Status Bar Gradient</string>
+<string name="statusbar_gradient_sum">Show a two-color gradient in the status bar on every screen</string>
+<string name="statusbar_gradient_top">Gradient Top Color</string>
+<string name="statusbar_gradient_bottom">Gradient Bottom Color</string>
     <string name="show_dnd_button_sum">Show button for DND Mode on home screen toolbar</string>
     <string name="dev4mod">Dev4Mod (Contributor)</string>
     <string name="disable_pinned_limit">Disable Pinned Chats Limit</string>
