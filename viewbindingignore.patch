@@ -1,0 +1,81 @@
+--- a/app/src/main/res/xml/fragment_customization.xml
++++ b/app/src/main/res/xml/fragment_customization.xml
+@@ -1,6 +1,8 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+-    xmlns:app="http://schemas.android.com/apk/res-auto">
++    xmlns:app="http://schemas.android.com/apk/res-auto"
++    xmlns:tools="http://schemas.android.com/tools"
++    tools:viewBindingIgnore="true">
+ 
+     <PreferenceCategory
+         app:iconSpaceReserved="false"
+--- a/app/src/main/res/xml/fragment_general.xml
++++ b/app/src/main/res/xml/fragment_general.xml
+@@ -1,5 +1,7 @@
+ <?xml version="1.0" encoding="utf-8"?>
+-<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
++<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto"
++    xmlns:tools="http://schemas.android.com/tools"
++    tools:viewBindingIgnore="true">
+ 
+     <Preference
+         app:fragment="com.wmods.wppenhacer.ui.fragments.GeneralFragment$HomeGeneralPreference"
+--- a/app/src/main/res/xml/fragment_media.xml
++++ b/app/src/main/res/xml/fragment_media.xml
+@@ -1,6 +1,8 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+-    xmlns:app="http://schemas.android.com/apk/res-auto">
++    xmlns:app="http://schemas.android.com/apk/res-auto"
++    xmlns:tools="http://schemas.android.com/tools"
++    tools:viewBindingIgnore="true">
+ 
+     <PreferenceCategory
+         app:iconSpaceReserved="false"
+--- a/app/src/main/res/xml/fragment_privacy.xml
++++ b/app/src/main/res/xml/fragment_privacy.xml
+@@ -1,6 +1,8 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+-    xmlns:app="http://schemas.android.com/apk/res-auto">
++    xmlns:app="http://schemas.android.com/apk/res-auto"
++    xmlns:tools="http://schemas.android.com/tools"
++    tools:viewBindingIgnore="true">
+ 
+     <PreferenceCategory app:title="@string/home_screen">
+ 
+--- a/app/src/main/res/xml/preference_general_conversation.xml
++++ b/app/src/main/res/xml/preference_general_conversation.xml
+@@ -1,5 +1,7 @@
+ <?xml version="1.0" encoding="utf-8"?>
+-<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
++<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto"
++    xmlns:tools="http://schemas.android.com/tools"
++    tools:viewBindingIgnore="true">
+     <PreferenceCategory
+         app:iconSpaceReserved="false"
+         app:title="@string/conversation">
+--- a/app/src/main/res/xml/preference_general_home.xml
++++ b/app/src/main/res/xml/preference_general_home.xml
+@@ -1,6 +1,8 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+-    xmlns:app="http://schemas.android.com/apk/res-auto">
++    xmlns:app="http://schemas.android.com/apk/res-auto"
++    xmlns:tools="http://schemas.android.com/tools"
++    tools:viewBindingIgnore="true">
+     <PreferenceCategory
+         app:iconSpaceReserved="false"
+         app:title="@string/general">
+--- a/app/src/main/res/xml/preference_general_homescreen.xml
++++ b/app/src/main/res/xml/preference_general_homescreen.xml
+@@ -1,5 +1,7 @@
+ <?xml version="1.0" encoding="utf-8"?>
+-<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto">
++<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto"
++    xmlns:tools="http://schemas.android.com/tools"
++    tools:viewBindingIgnore="true">
+     <PreferenceCategory
+         app:iconSpaceReserved="false"
+         app:title="@string/home_screen">
