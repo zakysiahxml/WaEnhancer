@@ -1,8 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools"
-    tools:viewBindingIgnore="true">
+    xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <PreferenceCategory
         app:iconSpaceReserved="false"
@@ -173,6 +171,27 @@
             app:key="bubble_right"
             app:summary="@string/default_color"
             app:title="@string/bubble_right" />
+
+        <rikka.material.preference.MaterialSwitchPreference
+            app:key="statusbar_gradient"
+            app:summary="@string/statusbar_gradient_sum"
+            app:title="@string/statusbar_gradient" />
+
+        <com.wmods.wppenhacer.preference.FeatureColorPreferenceCompat
+            app:cpv_showAlphaSlider="true"
+            app:dependency="statusbar_gradient"
+            app:icon="@drawable/ic_customization_palette_24"
+            app:key="statusbar_gradient_top"
+            app:summary="@string/default_color"
+            app:title="@string/statusbar_gradient_top" />
+
+        <com.wmods.wppenhacer.preference.FeatureColorPreferenceCompat
+            app:cpv_showAlphaSlider="true"
+            app:dependency="statusbar_gradient"
+            app:icon="@drawable/ic_customization_palette_24"
+            app:key="statusbar_gradient_bottom"
+            app:summary="@string/default_color"
+            app:title="@string/statusbar_gradient_bottom" />
     </PreferenceCategory>
 
     <PreferenceCategory
@@ -219,12 +238,6 @@
             app:key="igstatus"
             app:summary="@string/igstatus_on_home_screen_sum"
             app:title="@string/igstatus_on_home_screen" />
-
-        <rikka.material.preference.MaterialSwitchPreference
-            app:dependency="igstatus"
-            app:key="native_igstatus"
-            app:summary="@string/native_igstatus_sum"
-            app:title="@string/native_igstatus" />
 
         <rikka.material.preference.MaterialSwitchPreference
             app:key="channels"
