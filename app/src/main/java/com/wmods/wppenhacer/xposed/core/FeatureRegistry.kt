@@ -13,6 +13,7 @@ import com.wmods.wppenhacer.xposed.features.customization.GlassChatHeader
 import com.wmods.wppenhacer.xposed.features.customization.HideSeenView
 import com.wmods.wppenhacer.xposed.features.customization.HideTabs
 import com.wmods.wppenhacer.xposed.features.customization.IGStatus
+import com.wmods.wppenhacer.xposed.features.customization.IosTabBar
 import com.wmods.wppenhacer.xposed.features.customization.SeparateGroup
 import com.wmods.wppenhacer.xposed.features.customization.ShowOnline
 import com.wmods.wppenhacer.xposed.features.customization.StatusBarGradient
@@ -90,6 +91,7 @@ internal object FeatureRegistry {
         CustomThemeV2::class.java,
         FloatingBottomBar::class.java,
         GlassChatHeader::class.java,
+        IosTabBar::class.java,
         ChatLimit::class.java,
         SeparateGroup::class.java,
         ShowOnline::class.java,

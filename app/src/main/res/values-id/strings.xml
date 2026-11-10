@@ -117,6 +117,8 @@
     <string name="saved_to">"Disimpan ke"</string>
     <string name="hide_tabs_on_home">Sembunyikan Tab di Beranda</string>
     <string name="hide_tabs_on_home_sum">Sembunyikan tab di layar beranda seperti: Status, Komunitas, Panggilan</string>
+    <string name="ios_tab_bar">Tab Bar iOS</string>
+    <string name="ios_tab_bar_sum">Ganti ikon tab beranda dengan ikon gaya iOS (dari paket komponen DELTA)</string>
     <string name="communities">Komunitas</string>
     <string name="calls">Panggilan</string>
     <string name="updates">Pembaruan</string>

@@ -230,6 +230,11 @@
             app:summary="@string/floating_bottom_bar_active_pill_sum"
             app:title="@string/floating_bottom_bar_active_pill" />
 
+        <rikka.material.preference.MaterialSwitchPreference
+            app:key="ios_tab_bar"
+            app:summary="@string/ios_tab_bar_sum"
+            app:title="@string/ios_tab_bar" />
+
 
         <ListPreference
             android:defaultValue="0"
