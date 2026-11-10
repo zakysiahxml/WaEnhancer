@@ -3,12 +3,15 @@ package com.wmods.wppenhacer.xposed.features.customization
 import android.content.SharedPreferences
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
+import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
+import android.graphics.drawable.InsetDrawable
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
+import android.widget.Checkable
 import android.widget.FrameLayout
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -28,6 +31,13 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
         private const val BACKGROUND_ALPHA = 0.90f
         private const val STROKE_ALPHA = 0.40f
         private const val FAB_GAP_DP = 8f
+        // Pil tab aktif (gaya iOS, lihat screenshot referensi): pil gelap di
+        // belakang ikon+label tab yang sedang dipilih.
+        private const val PILL_RADIUS_DP = 20f
+        private const val PILL_ALPHA = 0.92f
+        private const val PILL_DARKEN = 0.65f
+        private const val PILL_INSET_H_DP = 4f
+        private const val PILL_INSET_V_DP = 6f
         private val FAB_RESOURCE_NAMES = arrayOf("fab", "fab_second", "extended_mini_fab")
     }
 
@@ -35,6 +45,9 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
     private val setupAttempts = WeakHashMap<ViewGroup, Int>()
     private val baseBottomPadding = WeakHashMap<ViewGroup, Int>()
     private val paddingGuarded = WeakHashMap<ViewGroup, Boolean>()
+    private val pillInstalled = WeakHashMap<ViewGroup, Boolean>()
+    private val originalItemBackgrounds = WeakHashMap<View, Drawable?>()
+    private val pillDrawables = WeakHashMap<View, Drawable>()
 
     override fun doHook() {
         if (!xprefs.getBoolean("floating_bottom_bar", false)) return
@@ -109,6 +122,7 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
             if (container.parent === rootView) {
                 updateOverlayLayout(rootView, container, bar)
                 applyTransparentShadowStyle(container, bar)
+                installActivePill(bar)
                 positionFabsAboveBar(rootView, container)
                 return true
             }
@@ -125,6 +139,7 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
             rootView.addView(container, rootParams)
 
             applyTransparentShadowStyle(container, bar)
+            installActivePill(bar)
             positionFabsAboveBar(rootView, container)
 
             logDebug("FloatingBottomBar applied as overlay")
@@ -267,6 +282,102 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
                 bar.layoutParams = params
             }
         }
+    }
+
+    // Pil tab aktif (gaya iOS): tab yang sedang dipilih dapat background pil
+    // gelap membulat di belakang ikon+labelnya, seperti tab "Chat" di
+    // screenshot referensi. Tab lain dibiarkan apa adanya (ripple bawaan).
+    // Dipasang hanya kalau toggle "floating_bottom_bar_active_pill" nyala.
+    private fun installActivePill(bar: ViewGroup) {
+        if (!xprefs.getBoolean("floating_bottom_bar_active_pill", false)) return
+        if (pillInstalled.put(bar, true) != null) {
+            applyActivePill(bar)
+            return
+        }
+        val menuView = findMenuView(bar) ?: run {
+            logDebug("FloatingBottomBar: menu tab tidak ketemu, pil aktif dilewati")
+            return
+        }
+        // Simpan background asli tiap item supaya bisa dikembalikan saat
+        // tab itu tidak aktif lagi (ripple bawaan jangan hilang permanen).
+        for (i in 0 until menuView.childCount) {
+            val item = menuView.getChildAt(i) ?: continue
+            if (!originalItemBackgrounds.containsKey(item)) {
+                originalItemBackgrounds[item] = item.background
+            }
+        }
+        menuView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+            applyActivePill(bar)
+        }
+        bar.post { applyActivePill(bar) }
+    }
+
+    private fun applyActivePill(bar: ViewGroup) {
+        try {
+            val menuView = findMenuView(bar) ?: return
+            for (i in 0 until menuView.childCount) {
+                val item = menuView.getChildAt(i) ?: continue
+                val isChecked = (item as? Checkable)?.isChecked == true
+                if (isChecked) {
+                    val pill = pillDrawables[item] ?: buildPillDrawable(bar).also {
+                        pillDrawables[item] = it
+                    }
+                    if (item.background !== pill) {
+                        item.background = pill
+                    }
+                } else {
+                    // Kembalikan background asli (ripple bawaan). Kalau item
+                    // ini baru muncul setelah install (tidak ada di peta),
+                    // jangan disentuh supaya ripple-nya tidak hilang.
+                    if (!originalItemBackgrounds.containsKey(item)) continue
+                    val original = originalItemBackgrounds[item]
+                    if (item.background !== original) {
+                        item.background = original
+                    }
+                }
+            }
+        } catch (e: Throwable) {
+            log(e)
+        }
+    }
+
+    private fun findMenuView(bar: ViewGroup): ViewGroup? {
+        for (i in 0 until bar.childCount) {
+            val child = bar.getChildAt(i) as? ViewGroup ?: continue
+            if (child.javaClass.simpleName.contains("MenuView")) return child
+        }
+        // Fallback: anak ViewGroup pertama (BottomNavigationView umumnya
+        // cuma punya satu anak, yaitu menu-nya).
+        return bar.getChildAt(0) as? ViewGroup
+    }
+
+    private fun buildPillDrawable(bar: ViewGroup): Drawable {
+        val baseColor = resolveBarColor(bar)
+        val pillColor = darkenColor(baseColor, PILL_DARKEN) and 0x00FFFFFF or
+            ((PILL_ALPHA * 255).toInt() shl 24)
+        val radius = Utils.dipToPixels(PILL_RADIUS_DP).toFloat()
+        val pill = GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadii = floatArrayOf(
+                radius, radius, radius, radius,
+                radius, radius, radius, radius
+            )
+            setColor(pillColor)
+        }
+        return InsetDrawable(
+            pill,
+            Utils.dipToPixels(PILL_INSET_H_DP),
+            Utils.dipToPixels(PILL_INSET_V_DP),
+            Utils.dipToPixels(PILL_INSET_H_DP),
+            Utils.dipToPixels(PILL_INSET_V_DP)
+        )
+    }
+
+    private fun darkenColor(color: Int, factor: Float): Int {
+        val red = (Color.red(color) * factor).toInt().coerceIn(0, 255)
+        val green = (Color.green(color) * factor).toInt().coerceIn(0, 255)
+        val blue = (Color.blue(color) * factor).toInt().coerceIn(0, 255)
+        return Color.rgb(red, green, blue)
     }
 
     private fun positionFabsAboveBar(rootView: ViewGroup, container: ViewGroup) {

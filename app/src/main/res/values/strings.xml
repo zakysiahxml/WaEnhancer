@@ -80,6 +80,10 @@
 <string name="statusbar_gradient_sum">Show a two-color gradient in the status bar on every screen</string>
 <string name="statusbar_gradient_top">Gradient Top Color</string>
 <string name="statusbar_gradient_bottom">Gradient Bottom Color</string>
+    <string name="glass_chat_header">Glass Chat Header</string>
+    <string name="glass_chat_header_sum">Show a floating frosted-glass header on the conversation screen</string>
+    <string name="floating_bottom_bar_active_pill">Highlight Active Tab</string>
+    <string name="floating_bottom_bar_active_pill_sum">Show a dark pill behind the selected tab in the floating bottom bar</string>
     <string name="show_dnd_button_sum">Show button for DND Mode on home screen toolbar</string>
     <string name="dev4mod">Dev4Mod (Contributor)</string>
     <string name="disable_pinned_limit">Disable Pinned Chats Limit</string>

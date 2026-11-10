@@ -192,6 +192,11 @@
             app:key="statusbar_gradient_bottom"
             app:summary="@string/default_color"
             app:title="@string/statusbar_gradient_bottom" />
+
+        <rikka.material.preference.MaterialSwitchPreference
+            app:key="glass_chat_header"
+            app:summary="@string/glass_chat_header_sum"
+            app:title="@string/glass_chat_header" />
     </PreferenceCategory>
 
     <PreferenceCategory
@@ -218,6 +223,12 @@
             app:min="0"
             app:showSeekBarValue="true"
             app:title="@string/floating_bottom_bar_radius" />
+
+        <rikka.material.preference.MaterialSwitchPreference
+            app:dependency="floating_bottom_bar"
+            app:key="floating_bottom_bar_active_pill"
+            app:summary="@string/floating_bottom_bar_active_pill_sum"
+            app:title="@string/floating_bottom_bar_active_pill" />
 
 
         <ListPreference

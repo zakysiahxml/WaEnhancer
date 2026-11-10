@@ -10,6 +10,10 @@
 <string name="statusbar_gradient_sum">Show a two-color gradient in the status bar on every screen</string>
 <string name="statusbar_gradient_top">Gradient Top Color</string>
 <string name="statusbar_gradient_bottom">Gradient Bottom Color</string>
+    <string name="glass_chat_header">Header Chat Kaca</string>
+    <string name="glass_chat_header_sum">Tampilkan header kaca mengambang di layar percakapan</string>
+    <string name="floating_bottom_bar_active_pill">Tandai Tab Aktif</string>
+    <string name="floating_bottom_bar_active_pill_sum">Tampilkan pil gelap di belakang tab yang dipilih di bar bawah mengambang</string>
     <string name="ghostmode_sum">Orang lain tidak akan mengetahui bahwa Anda sedang mengetik</string>
     <string name="ghostmode_r">Sembunyikan merekam audio...</string>
     <string name="ghostmode_sum_r">Orang lain tidak akan mengetahui bahwa Anda sedang merekam audio</string>

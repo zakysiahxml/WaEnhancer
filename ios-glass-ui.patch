@@ -1,0 +1,448 @@
+diff --git a/app/src/main/java/com/wmods/wppenhacer/xposed/core/FeatureRegistry.kt b/app/src/main/java/com/wmods/wppenhacer/xposed/core/FeatureRegistry.kt
+index 94f87aa..b874c6d 100644
+--- a/app/src/main/java/com/wmods/wppenhacer/xposed/core/FeatureRegistry.kt
++++ b/app/src/main/java/com/wmods/wppenhacer/xposed/core/FeatureRegistry.kt
+@@ -9,6 +9,7 @@ import com.wmods.wppenhacer.xposed.features.customization.CustomView
+ import com.wmods.wppenhacer.xposed.features.customization.DefaultEmoji
+ import com.wmods.wppenhacer.xposed.features.customization.FilterGroups
+ import com.wmods.wppenhacer.xposed.features.customization.FloatingBottomBar
++import com.wmods.wppenhacer.xposed.features.customization.GlassChatHeader
+ import com.wmods.wppenhacer.xposed.features.customization.HideSeenView
+ import com.wmods.wppenhacer.xposed.features.customization.HideTabs
+ import com.wmods.wppenhacer.xposed.features.customization.IGStatus
+@@ -88,6 +89,7 @@ internal object FeatureRegistry {
+         ActivityController::class.java,
+         CustomThemeV2::class.java,
+         FloatingBottomBar::class.java,
++        GlassChatHeader::class.java,
+         ChatLimit::class.java,
+         SeparateGroup::class.java,
+         ShowOnline::class.java,
+diff --git a/app/src/main/java/com/wmods/wppenhacer/xposed/features/customization/FloatingBottomBar.kt b/app/src/main/java/com/wmods/wppenhacer/xposed/features/customization/FloatingBottomBar.kt
+index f3a2c33..5a82749 100644
+--- a/app/src/main/java/com/wmods/wppenhacer/xposed/features/customization/FloatingBottomBar.kt
++++ b/app/src/main/java/com/wmods/wppenhacer/xposed/features/customization/FloatingBottomBar.kt
+@@ -3,12 +3,15 @@ package com.wmods.wppenhacer.xposed.features.customization
+ import android.content.SharedPreferences
+ import android.graphics.Color
+ import android.graphics.drawable.ColorDrawable
++import android.graphics.drawable.Drawable
+ import android.graphics.drawable.GradientDrawable
++import android.graphics.drawable.InsetDrawable
+ import android.util.TypedValue
+ import android.view.Gravity
+ import android.view.View
+ import android.view.ViewGroup
+ import android.view.ViewOutlineProvider
++import android.widget.Checkable
+ import android.widget.FrameLayout
+ import androidx.core.view.ViewCompat
+ import androidx.core.view.WindowInsetsCompat
+@@ -28,6 +31,13 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
+         private const val BACKGROUND_ALPHA = 0.90f
+         private const val STROKE_ALPHA = 0.40f
+         private const val FAB_GAP_DP = 8f
++        // Pil tab aktif (gaya iOS, lihat screenshot referensi): pil gelap di
++        // belakang ikon+label tab yang sedang dipilih.
++        private const val PILL_RADIUS_DP = 20f
++        private const val PILL_ALPHA = 0.92f
++        private const val PILL_DARKEN = 0.65f
++        private const val PILL_INSET_H_DP = 4f
++        private const val PILL_INSET_V_DP = 6f
+         private val FAB_RESOURCE_NAMES = arrayOf("fab", "fab_second", "extended_mini_fab")
+     }
+ 
+@@ -35,6 +45,9 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
+     private val setupAttempts = WeakHashMap<ViewGroup, Int>()
+     private val baseBottomPadding = WeakHashMap<ViewGroup, Int>()
+     private val paddingGuarded = WeakHashMap<ViewGroup, Boolean>()
++    private val pillInstalled = WeakHashMap<ViewGroup, Boolean>()
++    private val originalItemBackgrounds = WeakHashMap<View, Drawable?>()
++    private val pillDrawables = WeakHashMap<View, Drawable>()
+ 
+     override fun doHook() {
+         if (!xprefs.getBoolean("floating_bottom_bar", false)) return
+@@ -109,6 +122,7 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
+             if (container.parent === rootView) {
+                 updateOverlayLayout(rootView, container, bar)
+                 applyTransparentShadowStyle(container, bar)
++                installActivePill(bar)
+                 positionFabsAboveBar(rootView, container)
+                 return true
+             }
+@@ -125,6 +139,7 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
+             rootView.addView(container, rootParams)
+ 
+             applyTransparentShadowStyle(container, bar)
++            installActivePill(bar)
+             positionFabsAboveBar(rootView, container)
+ 
+             logDebug("FloatingBottomBar applied as overlay")
+@@ -269,6 +284,102 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
+         }
+     }
+ 
++    // Pil tab aktif (gaya iOS): tab yang sedang dipilih dapat background pil
++    // gelap membulat di belakang ikon+labelnya, seperti tab "Chat" di
++    // screenshot referensi. Tab lain dibiarkan apa adanya (ripple bawaan).
++    // Dipasang hanya kalau toggle "floating_bottom_bar_active_pill" nyala.
++    private fun installActivePill(bar: ViewGroup) {
++        if (!xprefs.getBoolean("floating_bottom_bar_active_pill", false)) return
++        if (pillInstalled.put(bar, true) != null) {
++            applyActivePill(bar)
++            return
++        }
++        val menuView = findMenuView(bar) ?: run {
++            logDebug("FloatingBottomBar: menu tab tidak ketemu, pil aktif dilewati")
++            return
++        }
++        // Simpan background asli tiap item supaya bisa dikembalikan saat
++        // tab itu tidak aktif lagi (ripple bawaan jangan hilang permanen).
++        for (i in 0 until menuView.childCount) {
++            val item = menuView.getChildAt(i) ?: continue
++            if (!originalItemBackgrounds.containsKey(item)) {
++                originalItemBackgrounds[item] = item.background
++            }
++        }
++        menuView.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
++            applyActivePill(bar)
++        }
++        bar.post { applyActivePill(bar) }
++    }
++
++    private fun applyActivePill(bar: ViewGroup) {
++        try {
++            val menuView = findMenuView(bar) ?: return
++            for (i in 0 until menuView.childCount) {
++                val item = menuView.getChildAt(i) ?: continue
++                val isChecked = (item as? Checkable)?.isChecked == true
++                if (isChecked) {
++                    val pill = pillDrawables[item] ?: buildPillDrawable(bar).also {
++                        pillDrawables[item] = it
++                    }
++                    if (item.background !== pill) {
++                        item.background = pill
++                    }
++                } else {
++                    // Kembalikan background asli (ripple bawaan). Kalau item
++                    // ini baru muncul setelah install (tidak ada di peta),
++                    // jangan disentuh supaya ripple-nya tidak hilang.
++                    if (!originalItemBackgrounds.containsKey(item)) continue
++                    val original = originalItemBackgrounds[item]
++                    if (item.background !== original) {
++                        item.background = original
++                    }
++                }
++            }
++        } catch (e: Throwable) {
++            log(e)
++        }
++    }
++
++    private fun findMenuView(bar: ViewGroup): ViewGroup? {
++        for (i in 0 until bar.childCount) {
++            val child = bar.getChildAt(i) as? ViewGroup ?: continue
++            if (child.javaClass.simpleName.contains("MenuView")) return child
++        }
++        // Fallback: anak ViewGroup pertama (BottomNavigationView umumnya
++        // cuma punya satu anak, yaitu menu-nya).
++        return bar.getChildAt(0) as? ViewGroup
++    }
++
++    private fun buildPillDrawable(bar: ViewGroup): Drawable {
++        val baseColor = resolveBarColor(bar)
++        val pillColor = darkenColor(baseColor, PILL_DARKEN) and 0x00FFFFFF or
++            ((PILL_ALPHA * 255).toInt() shl 24)
++        val radius = Utils.dipToPixels(PILL_RADIUS_DP).toFloat()
++        val pill = GradientDrawable().apply {
++            shape = GradientDrawable.RECTANGLE
++            cornerRadii = floatArrayOf(
++                radius, radius, radius, radius,
++                radius, radius, radius, radius
++            )
++            setColor(pillColor)
++        }
++        return InsetDrawable(
++            pill,
++            Utils.dipToPixels(PILL_INSET_H_DP),
++            Utils.dipToPixels(PILL_INSET_V_DP),
++            Utils.dipToPixels(PILL_INSET_H_DP),
++            Utils.dipToPixels(PILL_INSET_V_DP)
++        )
++    }
++
++    private fun darkenColor(color: Int, factor: Float): Int {
++        val red = (Color.red(color) * factor).toInt().coerceIn(0, 255)
++        val green = (Color.green(color) * factor).toInt().coerceIn(0, 255)
++        val blue = (Color.blue(color) * factor).toInt().coerceIn(0, 255)
++        return Color.rgb(red, green, blue)
++    }
++
+     private fun positionFabsAboveBar(rootView: ViewGroup, container: ViewGroup) {
+         val barHeight = container.height
+         if (barHeight <= 0) {
+diff --git a/app/src/main/java/com/wmods/wppenhacer/xposed/features/customization/GlassChatHeader.kt b/app/src/main/java/com/wmods/wppenhacer/xposed/features/customization/GlassChatHeader.kt
+new file mode 100644
+index 0000000..b23d8e3
+--- /dev/null
++++ b/app/src/main/java/com/wmods/wppenhacer/xposed/features/customization/GlassChatHeader.kt
+@@ -0,0 +1,200 @@
++package com.wmods.wppenhacer.xposed.features.customization
++
++import android.app.Activity
++import android.content.SharedPreferences
++import android.graphics.Color
++import android.graphics.drawable.ColorDrawable
++import android.graphics.drawable.GradientDrawable
++import android.os.Bundle
++import android.util.TypedValue
++import android.view.View
++import android.view.ViewGroup
++import android.view.ViewOutlineProvider
++import com.highcapable.kavaref.KavaRef.Companion.resolve
++import com.highcapable.yukihookapi.extension.kavaref.hook
++import com.wmods.wppenhacer.xposed.core.Feature
++import com.wmods.wppenhacer.xposed.utils.ReflectionUtils
++import com.wmods.wppenhacer.xposed.utils.Utils
++import java.util.WeakHashMap
++
++/**
++ * Header Chat Kaca (fitur sendiri, gaya iOS): toolbar layar percakapan
++ * (Conversation) diubah jadi pil kaca mengambang — sudut membulat, latar
++ * semi-transparan (frosted), ada jarak dari tepi layar dan dari status bar,
++ * plus bayangan halus. Ini yang bikin header di screenshot referensi terlihat
++ * "rapi bagus": bukan lagi bar penuh selebar layar, tapi satu pil yang
++ * mengambang di atas wallpaper chat.
++ *
++ * Cara kerja — meniru FloatingBottomBar (yang melakukan hal yang sama untuk
++ * bar bawah):
++ * - hook Conversation.onCreate (activity percakapan WA = com.whatsapp.Conversation,
++ *   nama class ini tidak diobfuscate, sama seperti yang dipakai
++ *   WppCore.getCurrentConversation()).
++ * - cari toolbar lewat id "toolbar" (id yang sama dipakai CustomToolbar
++ *   untuk toolbar beranda), lalu:
++ *   - parent AppBarLayout (kalau ada) dibuat transparan + elevation 0,
++ *     supaya latar solid di belakang pil tidak kelihatan;
++ *   - toolbar diberi background GradientDrawable membulat (radius 28dp,
++ *     warna diambil dari warna toolbar sekarang dengan alpha 0.85,
++ *     plus stroke tipis) + elevation buat bayangan;
++ *   - toolbar diberi margin kiri/kanan 12dp dan atas 8dp supaya mengambang.
++ * - guard: kalau WA menimpa background toolbar belakangan, listener
++ *   layout-change mengembalikannya ke drawable kaca yang sama.
++ *
++ * Yang TIDAK dilakukan di v1 (detail iOS lain dari screenshot):
++ * - angka "< 40" di sebelah tombol back (butuh TextView baru + hitung
++ *   unread, rawan posisi) dan ring hijau di avatar (butuh bungkus
++ *   ImageView) — keduanya dicatat buat lanjutkan kalau diminta.
++ * - bar input pesan di bawah TIDAK diubah.
++ *
++ * Jujur: kode ini belum dikompilasi di sini; bukti pertama adalah build
++ * GitHub Actions yang hijau + header berubah di HP. Tes hanya di WA
++ * companion Redmi, jangan di nomor utama.
++ */
++class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
++    Feature(loader, preferences) {
++
++    companion object {
++        private const val CORNER_RADIUS_DP = 28f
++        private const val SIDE_MARGIN_DP = 12f
++        private const val TOP_MARGIN_DP = 8f
++        private const val ELEVATION_DP = 4f
++        private const val BACKGROUND_ALPHA = 0.85f
++        private const val STROKE_ALPHA = 0.40f
++    }
++
++    private val glassDrawables = WeakHashMap<ViewGroup, GradientDrawable>()
++    private val guardInstalled = WeakHashMap<ViewGroup, Boolean>()
++
++    override fun doHook() {
++        if (!xprefs.getBoolean("glass_chat_header", false)) return
++
++        val conversationClass = try {
++            ReflectionUtils.findClass("com.whatsapp.Conversation", classLoader)
++        } catch (e: Throwable) {
++            log(e)
++            return
++        }
++
++        conversationClass.resolve().firstMethod {
++            name = "onCreate"
++            superclass()
++            parameters(Bundle::class.java)
++        }.hook {
++            after {
++                val activity = instance as? Activity ?: return@after
++                activity.window?.decorView?.post { styleHeader(activity) }
++            }
++        }
++    }
++
++    override fun getPluginName(): String {
++        return "Glass Chat Header"
++    }
++
++    private fun styleHeader(activity: Activity) {
++        try {
++            val toolbar = activity.findViewById<ViewGroup>(
++                Utils.getID("toolbar", "id")
++            ) ?: return
++            applyGlass(toolbar)
++        } catch (e: Throwable) {
++            log(e)
++        }
++    }
++
++    private fun applyGlass(toolbar: ViewGroup) {
++        try {
++            // AppBarLayout (pembungkus toolbar di Conversation) dibuat
++            // transparan supaya latar solidnya tidak kelihatan di belakang pil.
++            var ancestor = toolbar.parent as? ViewGroup
++            var depth = 0
++            while (ancestor != null && depth < 3) {
++                ancestor.clipChildren = false
++                ancestor.clipToPadding = false
++                if (ancestor.javaClass.simpleName.contains("AppBarLayout")) {
++                    ancestor.setBackgroundColor(Color.TRANSPARENT)
++                    ancestor.elevation = 0f
++                }
++                ancestor = ancestor.parent as? ViewGroup
++                depth++
++            }
++
++            val glass = glassDrawables[toolbar] ?: buildGlassDrawable(toolbar).also {
++                glassDrawables[toolbar] = it
++            }
++            toolbar.background = glass
++            toolbar.outlineProvider = ViewOutlineProvider.BACKGROUND
++            toolbar.elevation = Utils.dipToPixels(ELEVATION_DP).toFloat()
++
++            val sideMargin = Utils.dipToPixels(SIDE_MARGIN_DP)
++            val topMargin = Utils.dipToPixels(TOP_MARGIN_DP)
++            val params = toolbar.layoutParams as? ViewGroup.MarginLayoutParams
++            if (params != null && (params.leftMargin != sideMargin
++                        || params.topMargin != topMargin
++                        || params.rightMargin != sideMargin
++                        || params.bottomMargin != 0)
++            ) {
++                params.setMargins(sideMargin, topMargin, sideMargin, 0)
++                toolbar.layoutParams = params
++            }
++
++            installBackgroundGuard(toolbar, glass)
++        } catch (e: Throwable) {
++            log(e)
++        }
++    }
++
++    private fun buildGlassDrawable(toolbar: ViewGroup): GradientDrawable {
++        val barColor = resolveBarColor(toolbar)
++        val glassColor = (barColor and 0x00FFFFFF) or
++            ((BACKGROUND_ALPHA * 255).toInt() shl 24)
++        val strokeColor = if (isLightColor(barColor)) {
++            Color.argb((STROKE_ALPHA * 255).toInt(), 0, 0, 0)
++        } else {
++            Color.argb((STROKE_ALPHA * 255).toInt(), 255, 255, 255)
++        }
++        val radius = Utils.dipToPixels(CORNER_RADIUS_DP).toFloat()
++        return GradientDrawable().apply {
++            shape = GradientDrawable.RECTANGLE
++            cornerRadii = floatArrayOf(
++                radius, radius, radius, radius,
++                radius, radius, radius, radius
++            )
++            setColor(glassColor)
++            setStroke(Utils.dipToPixels(1f), strokeColor)
++        }
++    }
++
++    // Kalau WA menimpa background toolbar belakangan (mis. ganti tema),
++    // kembalikan ke drawable kaca yang sama. Satu listener per toolbar.
++    private fun installBackgroundGuard(toolbar: ViewGroup, glass: GradientDrawable) {
++        if (guardInstalled.put(toolbar, true) != null) return
++        toolbar.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
++            if (toolbar.background !== glass) {
++                toolbar.background = glass
++            }
++        }
++    }
++
++    private fun resolveBarColor(bar: ViewGroup): Int {
++        val currentBg = bar.background
++        if (currentBg is ColorDrawable) {
++            return currentBg.color
++        }
++        return try {
++            val typedValue = TypedValue()
++            bar.context.theme.resolveAttribute(android.R.attr.colorBackground, typedValue, true)
++            typedValue.data
++        } catch (_: Throwable) {
++            0xFF121212.toInt()
++        }
++    }
++
++    private fun isLightColor(color: Int): Boolean {
++        val red = Color.red(color)
++        val green = Color.green(color)
++        val blue = Color.blue(color)
++        return (red * 299 + green * 587 + blue * 114) / 1000 > 180
++    }
++}
+diff --git a/app/src/main/res/values-id/strings.xml b/app/src/main/res/values-id/strings.xml
+index a92d5fb..2f1828e 100644
+--- a/app/src/main/res/values-id/strings.xml
++++ b/app/src/main/res/values-id/strings.xml
+@@ -45,6 +45,10 @@
+     <string name="statusbar_gradient_sum">Tampilkan gradien dua warna di status bar di semua layar</string>
+     <string name="statusbar_gradient_top">Warna Atas Gradien</string>
+     <string name="statusbar_gradient_bottom">Warna Bawah Gradien</string>
++    <string name="glass_chat_header">Header Chat Kaca</string>
++    <string name="glass_chat_header_sum">Tampilkan header kaca mengambang di layar percakapan</string>
++    <string name="floating_bottom_bar_active_pill">Tandai Tab Aktif</string>
++    <string name="floating_bottom_bar_active_pill_sum">Tampilkan pil gelap di belakang tab yang dipilih di bar bawah mengambang</string>
+     <string name="novaconfig">Gaya Setelan Baru</string>
+     <string name="novaconfig_sum">Aktifkan gaya setelan baru dengan foto profil di layar beranda</string>
+     <string name="novofiltro">Fungsi Pencarian</string>
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index 275c970..fda1776 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -46,6 +46,10 @@
+     <string name="statusbar_gradient_sum">Show a two-color gradient in the status bar on every screen</string>
+     <string name="statusbar_gradient_top">Gradient Top Color</string>
+     <string name="statusbar_gradient_bottom">Gradient Bottom Color</string>
++    <string name="glass_chat_header">Glass Chat Header</string>
++    <string name="glass_chat_header_sum">Show a floating frosted-glass header on the conversation screen</string>
++    <string name="floating_bottom_bar_active_pill">Highlight Active Tab</string>
++    <string name="floating_bottom_bar_active_pill_sum">Show a dark pill behind the selected tab in the floating bottom bar</string>
+     <string name="novaconfig">New Settings Style</string>
+     <string name="novaconfig_sum">Enable the new settings style, with profile photo on home screen toolbar</string>
+     <string name="novofiltro">Search Functions</string>
+diff --git a/app/src/main/res/xml/fragment_customization.xml b/app/src/main/res/xml/fragment_customization.xml
+index 48e3718..95aa708 100644
+--- a/app/src/main/res/xml/fragment_customization.xml
++++ b/app/src/main/res/xml/fragment_customization.xml
+@@ -192,6 +192,11 @@
+             app:key="statusbar_gradient_bottom"
+             app:summary="@string/default_color"
+             app:title="@string/statusbar_gradient_bottom" />
++
++        <rikka.material.preference.MaterialSwitchPreference
++            app:key="glass_chat_header"
++            app:summary="@string/glass_chat_header_sum"
++            app:title="@string/glass_chat_header" />
+     </PreferenceCategory>
+ 
+     <PreferenceCategory
+@@ -219,6 +224,12 @@
+             app:showSeekBarValue="true"
+             app:title="@string/floating_bottom_bar_radius" />
+ 
++        <rikka.material.preference.MaterialSwitchPreference
++            app:dependency="floating_bottom_bar"
++            app:key="floating_bottom_bar_active_pill"
++            app:summary="@string/floating_bottom_bar_active_pill_sum"
++            app:title="@string/floating_bottom_bar_active_pill" />
++
+ 
+         <ListPreference
+             android:defaultValue="0"
