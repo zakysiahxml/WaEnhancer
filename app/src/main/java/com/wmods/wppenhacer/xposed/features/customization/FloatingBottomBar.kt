@@ -282,7 +282,7 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
         // / native lib gagal / bar bukan FrameLayout), fallback ke
         // GlassBarBlur (blur bitmap sendiri).
         if (isGlass()) {
-            bar.post { installLiquidGlass(bar, rootView) }
+            bar.post { installLiquidGlass(bar, bar.rootView) }
         }
     }
 
