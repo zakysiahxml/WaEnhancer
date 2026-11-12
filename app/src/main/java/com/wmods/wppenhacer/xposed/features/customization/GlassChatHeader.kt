@@ -24,6 +24,7 @@ import com.highcapable.yukihookapi.extension.kavaref.hook
 import com.wmods.wppenhacer.xposed.core.Feature
 import com.wmods.wppenhacer.xposed.utils.ReflectionUtils
 import com.wmods.wppenhacer.xposed.utils.Utils
+import java.util.WeakHashMap
 
 /**
  * Header Chat Kaca v2 — gaya iOS, sama persis kayak screenshot referensi:
