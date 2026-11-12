@@ -306,6 +306,7 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
             if (attempt < 10) {
                 bar.postDelayed({ tryInstallLiquidGlass(bar, attempt + 1) }, 300L)
             } else {
+                logDebug("FloatingBottomBar: backdrop tidak ketemu setelah 10x, fallback GlassBarBlur")
                 val radiusDp = xprefs.getInt(
                     "floating_bottom_bar_radius", CORNER_RADIUS_DP.toInt()
                 ).toFloat()
@@ -346,6 +347,12 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
             // Bar jadi transparan, kacanya yang ngegambar.
             bar.background = null
             bar.addView(glass, 0)
+            logDebug(
+                "FloatingBottomBar: kaca terpasang, backdrop=" +
+                        "${backdrop.javaClass.simpleName} " +
+                        "${backdrop.width}x${backdrop.height} " +
+                        "anak=${(backdrop as? ViewGroup)?.childCount}"
+            )
             return true
         } catch (e: Throwable) {
             log(e)
@@ -355,18 +362,44 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
         }
     }
 
-    /** Cari RecyclerView pertama (BFS) dari root — sumber backdrop kaca. */
+    /**
+     * Cari RecyclerView TERBAIK sebagai sumber backdrop kaca — BUKAN yang
+     * pertama ketemu. First-match BFS pernah mengambil RecyclerView yang
+     * salah (kosong/tersembunyi) sehingga kaca cuma transparan tanpa blur:
+     * hasil capture-nya bitmap kosong, dan isi chat di belakang bar
+     * kelihatan tajam karena kaca tidak menggambar apa-apa.
+     * Kriteria: harus VISIBLE + sudah ter-layout + punya anak; pemenang =
+     * area terbesar (list chat utama selalu yang terbesar di layar).
+     */
     private fun findRecyclerView(root: View): RecyclerView? {
         val queue = ArrayDeque<View>()
         queue.add(root)
+        var best: RecyclerView? = null
+        var bestArea = 0
+        var found = 0
         while (queue.isNotEmpty()) {
             val view = queue.removeFirst()
-            if (view is RecyclerView) return view
+            if (view is RecyclerView) {
+                found++
+                val area = view.width * view.height
+                val usable = view.visibility == View.VISIBLE &&
+                        view.width > 0 && view.height > 0 &&
+                        view.childCount > 0
+                if (usable && area > bestArea) {
+                    best = view
+                    bestArea = area
+                }
+            }
             if (view is ViewGroup) {
                 for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
             }
         }
-        return null
+        logDebug(
+            "FloatingBottomBar: backdrop scan: $found RecyclerView, " +
+                    "pilih=${best?.javaClass?.simpleName} " +
+                    "${best?.width}x${best?.height} anak=${best?.childCount}"
+        )
+        return best
     }
 
     /**

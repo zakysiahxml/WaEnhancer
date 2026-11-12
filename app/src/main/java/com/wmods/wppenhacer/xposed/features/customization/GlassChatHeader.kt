@@ -3,6 +3,7 @@ package com.wmods.wppenhacer.xposed.features.customization
 import android.app.Activity
 import android.content.SharedPreferences
 import android.graphics.Color
+import android.graphics.drawable.Drawable
 import android.graphics.Outline
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
@@ -21,7 +22,9 @@ import com.example.liquidglass.GlassMaterial
 import com.example.liquidglass.LiquidGlassView
 import com.highcapable.kavaref.KavaRef.Companion.resolve
 import com.highcapable.yukihookapi.extension.kavaref.hook
+import com.wmods.wppenhacer.R
 import com.wmods.wppenhacer.xposed.core.Feature
+import com.wmods.wppenhacer.xposed.core.FeatureLoader
 import com.wmods.wppenhacer.xposed.utils.ReflectionUtils
 import com.wmods.wppenhacer.xposed.utils.Utils
 import java.util.WeakHashMap
@@ -432,21 +435,82 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
         }
     }
 
-    /** Cari RecyclerView pertama (BFS) dari root — sumber backdrop kaca. */
+    /**
+     * Cari RecyclerView TERBAIK sebagai sumber backdrop kaca — BUKAN yang
+     * pertama ketemu. First-match BFS pernah mengambil RecyclerView yang
+     * salah (kosong/tersembunyi) sehingga ketiga pil cuma transparan tanpa
+     * blur: batas antar pil tidak kelihatan, dan ikon VC/telpon seolah
+     * menyatu dengan pil nama. Sama persis dengan cacat backdrop bar bawah.
+     * Kriteria: harus VISIBLE + sudah ter-layout + punya anak; pemenang =
+     * area terbesar (list pesan selalu yang terbesar di layar chat).
+     */
     private fun findRecyclerView(root: View): RecyclerView? {
         val queue = ArrayDeque<View>()
         queue.add(root)
+        var best: RecyclerView? = null
+        var bestArea = 0
+        var found = 0
         while (queue.isNotEmpty()) {
             val view = queue.removeFirst()
-            if (view is RecyclerView) return view
+            if (view is RecyclerView) {
+                found++
+                val area = view.width * view.height
+                val usable = view.visibility == View.VISIBLE &&
+                        view.width > 0 && view.height > 0 &&
+                        view.childCount > 0
+                if (usable && area > bestArea) {
+                    best = view
+                    bestArea = area
+                }
+            }
             if (view is ViewGroup) {
                 for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
             }
         }
-        return null
+        logDebug(
+            "GlassChatHeader: backdrop scan: $found RecyclerView, " +
+                    "pilih=${best?.javaClass?.simpleName} " +
+                    "${best?.width}x${best?.height} anak=${best?.childCount}"
+        )
+        return best
     }
 
     /** Pil 1 — back: lingkaran kaca berisi panah back + angka unread. */
+    /**
+     * Kembalikan view yang dipindah ke kondisi tampil normal.
+     *
+     * WA menganimasikan avatar + nama/status (fade-in) saat chat dibuka.
+     * removeView() membatalkan animator yang sedang berjalan sehingga
+     * view-nya tertinggal dalam keadaan transparan / tidak terlihat
+     * (alpha 0) di parent barunya — persis gejala di HP Ajen (pil nama
+     * kosong, pil back + aksi normal karena tidak ikut animasi itu).
+     * Setiap view yang dipindah harus dilewatkan sini.
+     */
+    private fun reviveView(view: View) {
+        try {
+            view.clearAnimation()
+            view.alpha = 1f
+            view.visibility = View.VISIBLE
+            view.translationX = 0f
+            view.translationY = 0f
+            view.scaleX = 1f
+            view.scaleY = 1f
+            view.rotation = 0f
+        } catch (e: Throwable) {
+            log(e)
+        }
+    }
+
+    /** Muat drawable dari resource MODUL (bukan resource WA). */
+    private fun loadModuleDrawable(resId: Int): Drawable? {
+        return try {
+            FeatureLoader.moduleContext.getDrawable(resId)
+        } catch (e: Throwable) {
+            log(e)
+            null
+        }
+    }
+
     private fun buildBackPill(
         activity: Activity,
         navButton: View?,
@@ -467,6 +531,7 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
         }
         if (navButton != null) {
             (navButton.parent as? ViewGroup)?.removeView(navButton)
+            reviveView(navButton)
             navButton.setBackgroundColor(Color.TRANSPARENT)
             val navSize = Utils.dipToPixels(24f)
             navButton.layoutParams = LinearLayout.LayoutParams(navSize, navSize)
@@ -516,6 +581,7 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
         }
         if (avatarView != null) {
             (avatarView.parent as? ViewGroup)?.removeView(avatarView)
+            reviveView(avatarView)
             // Ring hijau di sekeliling avatar.
             avatarView.outlineProvider = object : ViewOutlineProvider() {
                 override fun getOutline(view: View, outline: Outline) {
@@ -558,6 +624,7 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
             }
             for (tv in titleViews) {
                 (tv.parent as? ViewGroup)?.removeView(tv)
+                reviveView(tv)
                 tv.layoutParams = LinearLayout.LayoutParams(
                     ViewGroup.LayoutParams.WRAP_CONTENT,
                     ViewGroup.LayoutParams.WRAP_CONTENT
@@ -566,6 +633,16 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
             }
             row.addView(textCol)
         }
+        // Jaring pengaman: kalau animasi WA yang datang terlambat
+        // menyembunyikan lagi view yang sudah dipindah, paksa tampil.
+        val movedNameViews = ArrayList<View>()
+        if (avatarView != null) movedNameViews.add(avatarView)
+        movedNameViews.addAll(titleViews)
+        pill.postDelayed(Runnable {
+            for (v in movedNameViews) {
+                if (v.alpha < 0.99f || v.visibility != View.VISIBLE) reviveView(v)
+            }
+        }, 600)
         pill.addView(row)
         return pill
     }
@@ -600,17 +677,44 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
             val padV = Utils.dipToPixels(6f)
             setPadding(padH, padV, padH, padV)
         }
+        // Ikon outline gaya referensi (video + telpon). Urutan bawaan WA:
+        // ImageButton pertama = Video call, kedua = Voice call; overflow
+        // adalah ImageView terpisah dan dibiarkan apa adanya supaya menu
+        // chat tidak hilang.
+        var imageButtonIndex = 0
+        val actionBtnSize = Utils.dipToPixels(40f)
         for (btn in buttons) {
             (btn.parent as? ViewGroup)?.removeView(btn)
-            if (btn is ImageButton) btn.setBackgroundColor(Color.TRANSPARENT)
-            val p = LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.WRAP_CONTENT,
-                ViewGroup.LayoutParams.WRAP_CONTENT
-            ).apply {
-                leftMargin = Utils.dipToPixels(4f)
-                rightMargin = Utils.dipToPixels(4f)
+            reviveView(btn)
+            if (btn is ImageButton) {
+                btn.setBackgroundColor(Color.TRANSPARENT)
+                val iconRes = when (imageButtonIndex) {
+                    0 -> R.drawable.zky_action_video
+                    1 -> R.drawable.zky_action_call
+                    else -> 0
+                }
+                imageButtonIndex++
+                if (iconRes != 0) {
+                    loadModuleDrawable(iconRes)?.let { drawable ->
+                        btn.scaleType = ImageView.ScaleType.FIT_CENTER
+                        btn.setImageDrawable(drawable)
+                    }
+                }
+                val p = LinearLayout.LayoutParams(actionBtnSize, actionBtnSize).apply {
+                    leftMargin = Utils.dipToPixels(4f)
+                    rightMargin = Utils.dipToPixels(4f)
+                }
+                btn.layoutParams = p
+            } else {
+                val p = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                ).apply {
+                    leftMargin = Utils.dipToPixels(4f)
+                    rightMargin = Utils.dipToPixels(4f)
+                }
+                btn.layoutParams = p
             }
-            btn.layoutParams = p
             row.addView(btn)
         }
         pill.addView(row)
