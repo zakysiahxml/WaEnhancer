@@ -84,6 +84,8 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
     }
 
     private val styledToolbars = WeakHashMap<ViewGroup, Boolean>()
+    private val styleAttempts = WeakHashMap<ViewGroup, Int>()
+    private val v2Applied = WeakHashMap<ViewGroup, Boolean>()
 
     override fun doHook() {
         if (!xprefs.getBoolean("glass_chat_header", false)) return
@@ -129,10 +131,26 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
             val toolbar = activity.findViewById<ViewGroup>(
                 Utils.getID("toolbar", "id")
             ) ?: return
-            if (styledToolbars.put(toolbar, true) != null) return
+            if (styledToolbars[toolbar] == true) return
+            // Toolbar belum punya anak (WA belum selesai menatanya):
+            // JANGAN di-guard dan JANGAN fallback ke v1 — coba lagi
+            // sebentar lagi. Kalau langsung fallback di sini, guard
+            // menutup semua percobaan ulang dan header terjebak di v1.
+            if (toolbar.childCount == 0) {
+                val attempts = styleAttempts.getOrDefault(toolbar, 0)
+                if (attempts < 3) {
+                    styleAttempts[toolbar] = attempts + 1
+                    toolbar.postDelayed({ styleHeader(activity) }, 400L)
+                }
+                return
+            }
             // Coba v2 (tiga pil). Gagal -> v1 (satu pil).
-            if (!tryRestructureToPills(activity, toolbar)) {
+            if (tryRestructureToPills(activity, toolbar)) {
+                styledToolbars[toolbar] = true
+                v2Applied[toolbar] = true
+            } else {
                 applyGlassV1(toolbar)
+                styledToolbars[toolbar] = true
             }
         } catch (e: Throwable) {
             log(e)
@@ -166,22 +184,48 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
             for (i in 0 until toolbar.childCount) children.add(toolbar.getChildAt(i))
             if (children.isEmpty()) return false
 
-            val navButton = findNavButton(toolbar, children)
-            val avatarView = findAvatarView(children)
-            val titleViews = findTitleViews(children)
-            val actionMenu = findActionMenu(children)
+            val navButton = findNavButton(toolbar)
+            val avatarView = findAvatarView(toolbar)
+            val titleViews = findTitleViews(toolbar)
+            val actionMenu = findActionMenu(toolbar)
+            logDebug("GlassChatHeader: anak=${children.size} nav=${navButton != null} avatar=${avatarView != null} judul=${titleViews.size} menu=${actionMenu != null}")
             // Minimal harus ada tombol back + judul. Kalau tidak ada, v1 saja.
-            if (navButton == null && titleViews.isEmpty()) return false
+            if (navButton == null && titleViews.isEmpty()) {
+                logDebug("GlassChatHeader: back + judul tidak ketemu, pakai v1")
+                return false
+            }
 
             // Backdrop buat kaca = RecyclerView chat di belakang header.
             val backdrop = activity.window?.decorView?.let { findRecyclerView(it) }
 
-            // Pil 1 — back (lingkaran): panah back + angka unread.
-            val backPill = buildBackPill(activity, navButton, backdrop)
-            // Pil 2 — nama: avatar (ring hijau) + nama + last seen.
-            val namePill = buildNamePill(activity, avatarView, titleViews, backdrop)
-            // Pil 3 — aksi: tombol video + telpon (+ overflow kalau ada).
-            val actionPill = buildActionPill(activity, actionMenu, backdrop)
+            // Tiap pil dibangun terpisah: satu pil gagal tidak boleh
+            // menggagalkan pil lainnya.
+            var backPill: ViewGroup? = null
+            var namePill: ViewGroup? = null
+            var actionPill: ViewGroup? = null
+            try {
+                // Pil 1 — back (lingkaran): panah back + angka unread.
+                backPill = buildBackPill(activity, navButton, backdrop)
+            } catch (e: Throwable) {
+                log(e)
+            }
+            try {
+                // Pil 2 — nama: avatar (ring hijau) + nama + last seen.
+                namePill = buildNamePill(activity, avatarView, titleViews, backdrop)
+            } catch (e: Throwable) {
+                log(e)
+            }
+            try {
+                // Pil 3 — aksi: tombol video + telpon (+ overflow kalau ada).
+                actionPill = buildActionPill(activity, actionMenu, backdrop)
+            } catch (e: Throwable) {
+                log(e)
+            }
+            val pills = listOfNotNull(backPill, namePill, actionPill)
+            if (pills.size < 2) {
+                logDebug("GlassChatHeader: hanya ${pills.size} pil berhasil, pakai v1")
+                return false
+            }
 
             // Lepas semua anak lama dari toolbar, ganti dengan container
             // horizontal berisi tiga pil + pemisah (gap) di antaranya.
@@ -201,12 +245,9 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
                 )
             }
             val gapPx = Utils.dipToPixels(PILL_GAP_DP)
-            container.addView(backPill)
-            addGap(container, gapPx)
-            container.addView(namePill)
-            if (actionPill != null) {
-                addGap(container, gapPx)
-                container.addView(actionPill)
+            for ((index, pill) in pills.withIndex()) {
+                if (index > 0) addGap(container, gapPx)
+                container.addView(pill)
             }
             // Sisa view yang tidak dikenal (kalau ada) jangan dibuang:
             // taruh di akhir container supaya tidak hilang.
@@ -216,6 +257,10 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
             titleViews.forEach { used.add(it) }
             if (actionMenu != null) used.add(actionMenu)
             for (child in children) {
+                // Container yang sudah dikosongkan (isinya pindah ke pil,
+                // mis. conversation_contact / contact_photo_view) jangan
+                // ikut ditambahkan — cuma makan tempat.
+                if (child is ViewGroup && child.childCount == 0) continue
                 if (child !in used && child.parent == null) {
                     container.addView(child)
                 }
@@ -224,7 +269,7 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
 
             // Pil yang BUKAN LiquidGlassView (fallback) dikasih blur
             // bitmap sendiri; pil Liquid Glass sudah ngegambar sendiri.
-            for (pill in listOfNotNull(backPill, namePill, actionPill)) {
+            for (pill in pills) {
                 if (pill is LiquidGlassView) continue
                 pill.post {
                     val ok = GlassBarBlur.applyBlur(pill, PILL_RADIUS_DP)
@@ -244,54 +289,109 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
         })
     }
 
-    /** Tombol back = ImageButton pertama (navigation icon) di toolbar. */
-    private fun findNavButton(toolbar: ViewGroup, children: List<View>): ImageButton? {
-        // Coba lewat navigationIcon dulu: view yang drawable-nya sama.
-        for (child in children) {
+    /** Cari depth-first (maks 4 level): struktur toolbar WA bersarang. */
+    private fun findFirstRecursive(root: ViewGroup, depth: Int, match: (View) -> Boolean): View? {
+        if (depth > 4) return null
+        for (i in 0 until root.childCount) {
+            val child = root.getChildAt(i)
+            if (match(child)) return child
+            if (child is ViewGroup) {
+                val found = findFirstRecursive(child, depth + 1, match)
+                if (found != null) return found
+            }
+        }
+        return null
+    }
+
+    /** Kumpulkan semua yang cocok, tanpa masuk ke dalam menu aksi. */
+    private fun collectRecursive(root: ViewGroup, depth: Int, out: MutableList<View>, match: (View) -> Boolean) {
+        if (depth > 4) return
+        for (i in 0 until root.childCount) {
+            val child = root.getChildAt(i)
+            if (match(child)) out.add(child)
+            if (child is ViewGroup && !isActionMenu(child)) {
+                collectRecursive(child, depth + 1, out, match)
+            }
+        }
+    }
+
+    /**
+     * Cari view dari [toolbar] berdasarkan NAMA id resource WA (rekursif,
+     * pakai findViewById). Id dicari dulu di dalam toolbar, kalau tidak
+     * ketemu dicari di parent-nya (holder) untuk jaga-jaga.
+     * Id-id ini VERIFIED dari hierarchy dump di HP Ajen (WA 2.26.41.77).
+     */
+    private fun findByWaId(toolbar: ViewGroup, name: String): View? {
+        val resId = Utils.getID(name, "id")
+        if (resId == 0) return null
+        toolbar.findViewById<View>(resId)?.let { return it }
+        val parent = toolbar.parent as? ViewGroup
+        return parent?.findViewById<View>(resId)
+    }
+
+    /**
+     * Tombol back = id whatsapp_toolbar_home (ImageView di WA 2.26.41,
+     * BUKAN ImageButton — itu sebabnya pencarian lama selalu gagal).
+     * Cadangan: ImageButton pertama (rekursif, bukan di dalam menu aksi).
+     */
+    private fun findNavButton(toolbar: ViewGroup): View? {
+        findByWaId(toolbar, "whatsapp_toolbar_home")?.let { return it }
+        // Anak langsung dulu (tombol back biasanya anak pertama toolbar).
+        for (i in 0 until toolbar.childCount) {
+            val child = toolbar.getChildAt(i)
             if (child is ImageButton) return child
         }
-        return null
-    }
-
-    /** Avatar = ImageView (bukan tombol back) di toolbar. */
-    private fun findAvatarView(children: List<View>): ImageView? {
-        for (child in children) {
-            if (child is ImageView && child !is ImageButton) return child
-        }
-        // Avatar kadang dibungkus satu level: cari ImageView di dalam
-        // anak ViewGroup pertama yang bukan ActionMenu.
-        for (child in children) {
+        // Lalu cari di dalam container lain (bukan menu aksi).
+        for (i in 0 until toolbar.childCount) {
+            val child = toolbar.getChildAt(i)
             if (child is ViewGroup && !isActionMenu(child)) {
-                for (i in 0 until child.childCount) {
-                    val grand = child.getChildAt(i)
-                    if (grand is ImageView && grand !is ImageButton) return grand
-                }
+                val found = findFirstRecursive(child, 1) { it is ImageButton }
+                if (found != null) return found
             }
         }
         return null
     }
 
-    /** Judul + subtitle = semua TextView di toolbar (langsung / satu level). */
-    private fun findTitleViews(children: List<View>): List<TextView> {
-        val out = ArrayList<TextView>()
-        for (child in children) {
-            if (child is TextView) out.add(child)
-            if (child is ViewGroup && !isActionMenu(child)) {
-                for (i in 0 until child.childCount) {
-                    val grand = child.getChildAt(i)
-                    if (grand is TextView) out.add(grand)
-                }
-            }
-        }
-        return out
+    /**
+     * Avatar = id conversation_contact_photo (di dalam FrameLayout
+     * contact_photo_view). Cadangan: ImageView pertama yang BUKAN tombol
+     * back (tombol back juga ImageView — jangan sampai ketukar).
+     */
+    private fun findAvatarView(toolbar: ViewGroup): ImageView? {
+        (findByWaId(toolbar, "conversation_contact_photo") as? ImageView)?.let { return it }
+        val navButton = findNavButton(toolbar)
+        val out = ArrayList<View>()
+        collectRecursive(toolbar, 0, out) { it is ImageView && it !is ImageButton }
+        return out.firstOrNull { it !== navButton } as? ImageView
     }
 
-    /** Menu aksi (video / telpon / overflow) = ActionMenuView di toolbar. */
-    private fun findActionMenu(children: List<View>): ViewGroup? {
-        for (child in children) {
-            if (child is ViewGroup && isActionMenu(child)) return child
+    /**
+     * Judul + subtitle = semua TextView di dalam id conversation_contact
+     * (container nama + status). Cadangan: semua TextView di luar menu aksi.
+     */
+    private fun findTitleViews(toolbar: ViewGroup): List<TextView> {
+        val contact = findByWaId(toolbar, "conversation_contact") as? ViewGroup
+        if (contact != null) {
+            val out = ArrayList<View>()
+            collectRecursive(contact, 0, out) { it is TextView }
+            val titles = out.filterIsInstance<TextView>()
+            if (titles.isNotEmpty()) return titles
         }
-        return null
+        val out = ArrayList<View>()
+        collectRecursive(toolbar, 0, out) { it is TextView }
+        return out.filterIsInstance<TextView>()
+    }
+
+    /**
+     * Menu aksi (video / telpon / overflow) = parent dari id
+     * menuitem_overflow. Container-nya sendiri TIDAK punya id dan class-nya
+     * obfuscated (bukan ActionMenuView) — jadi diambil lewat overflow.
+     * Cadangan: ViewGroup bernama *ActionMenu*.
+     */
+    private fun findActionMenu(toolbar: ViewGroup): ViewGroup? {
+        val overflow = findByWaId(toolbar, "menuitem_overflow")
+        (overflow?.parent as? ViewGroup)?.let { return it }
+        return findFirstRecursive(toolbar, 0) { isActionMenu(it) } as? ViewGroup
     }
 
     private fun isActionMenu(view: View): Boolean {
@@ -313,11 +413,12 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
         try {
             return LiquidGlassView(activity).apply {
                 cornerRadius = Utils.dipToPixels(radiusDp).toFloat()
-                material = GlassMaterial.REGULAR
+                material = GlassMaterial.CLEAR
                 enableDynamicBackground = true
                 enableSensorHighlight = true
                 enableAdaptiveTint = true
-                setGlassTint(0xFF2E3B42.toInt(), 0.40f)
+                // Kaca harus TEMBUS seperti referensi: tint terang tipis.
+                setGlassTint(0xFF9AA7B2.toInt(), 0.15f)
                 backdropSource = backdrop
                 clipChildren = false
                 clipToPadding = false
@@ -348,7 +449,7 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
     /** Pil 1 — back: lingkaran kaca berisi panah back + angka unread. */
     private fun buildBackPill(
         activity: Activity,
-        navButton: ImageButton?,
+        navButton: View?,
         backdrop: RecyclerView?
     ): ViewGroup {
         val ctx = activity
@@ -585,7 +686,10 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
                 toolbar.layoutParams = params
             }
             toolbar.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-                if (toolbar.background !== glass) toolbar.background = glass
+                // Jangan melawan v2 kalau restrukturisasi berhasil belakangan.
+                if (v2Applied[toolbar] != true && toolbar.background !== glass) {
+                    toolbar.background = glass
+                }
             }
         } catch (e: Throwable) {
             log(e)

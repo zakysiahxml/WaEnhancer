@@ -224,6 +224,16 @@
             app:showSeekBarValue="true"
             app:title="@string/floating_bottom_bar_radius" />
 
+        <SeekBarPreference
+            android:defaultValue="16"
+            android:max="48"
+            app:dependency="floating_bottom_bar"
+            app:key="floating_bottom_bar_icon_spacing"
+            app:min="0"
+            app:showSeekBarValue="true"
+            app:summary="@string/floating_bottom_bar_icon_spacing_sum"
+            app:title="@string/floating_bottom_bar_icon_spacing" />
+
         <rikka.material.preference.MaterialSwitchPreference
             app:dependency="floating_bottom_bar"
             app:key="floating_bottom_bar_active_pill"

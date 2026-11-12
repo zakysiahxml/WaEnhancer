@@ -1,6 +1,8 @@
 package com.wmods.wppenhacer.xposed.features.customization
 
 import android.app.Activity
+import android.content.Context
+import android.content.ContextWrapper
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Path
@@ -40,16 +42,25 @@ object GlassBarBlur {
     private const val CAPTURE_SCALE = 0.25f
     // Radius blur (dalam px pada bitmap yang sudah di-downscale).
     private const val BLUR_RADIUS = 18f
-    // Warna blur harus mirip screenshot referensi: bar kaca di sana bukan
-    // hitam polos, tapi abu-abu gelap kebiruan. Jadi di atas hasil blur
-    // ditimpa overlay gelap (alpha 0.40) biar warnanya sama.
-    private const val OVERLAY_COLOR = 0x662E3B42.toInt()
+    // Overlay tipis di atas hasil blur (alpha 0.20): cukup memberi warna
+    // abu-abu kebiruan, tapi isi di belakang bar tetap kelihatan.
+    private const val OVERLAY_COLOR = 0x332E3B42.toInt()
     // Jeda minimum antar update saat scroll (ms).
     private const val UPDATE_THROTTLE_MS = 120L
 
     private var lastUpdateMs = 0L
     private var scrollListenerAttachedTo: RecyclerView? = null
     private var currentRadiusDp = 28f
+
+    /** Cari Activity dari context (context bisa terbungkus ContextWrapper). */
+    private fun Context.findActivity(): Activity? {
+        var ctx: Context? = this
+        while (ctx != null) {
+            if (ctx is Activity) return ctx
+            ctx = (ctx as? ContextWrapper)?.baseContext
+        }
+        return null
+    }
 
     /**
      * Pasang blur ke [bar]. Dipanggil sesudah bar selesai di-setup sebagai
@@ -58,7 +69,7 @@ object GlassBarBlur {
      */
     fun applyBlur(bar: ViewGroup, radiusDp: Float): Boolean {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
-        val activity = bar.context as? Activity ?: return false
+        val activity = bar.context.findActivity() ?: return false
         val root = activity.window?.decorView as? ViewGroup ?: return false
         currentRadiusDp = radiusDp
         val blurred = captureAndBlur(bar, root, radiusDp) ?: return false
@@ -73,7 +84,7 @@ object GlassBarBlur {
         if (now - lastUpdateMs < UPDATE_THROTTLE_MS) return
         lastUpdateMs = now
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return
-        val activity = bar.context as? Activity ?: return
+        val activity = bar.context.findActivity() ?: return
         val root = activity.window?.decorView as? ViewGroup ?: return
         val blurred = captureAndBlur(bar, root, radiusDp) ?: return
         bar.post { bar.background = BitmapDrawable(bar.resources, blurred) }

@@ -187,6 +187,8 @@
     <string name="floating_bottom_bar_sum">Enable iOS-style floating bottom navigation bar</string>
     <string name="floating_bottom_bar_radius">Bottom Bar Corner Radius</string>
     <string name="floating_bottom_bar_radius_sum">Adjust the border radius of the floating bottom bar</string>
+    <string name="floating_bottom_bar_icon_spacing">Icon Spacing</string>
+    <string name="floating_bottom_bar_icon_spacing_sum">Adjust the gap between home tab icons</string>
     <string name="ios_tab_bar">iOS Tab Bar</string>
     <string name="ios_tab_bar_sum">Replace home tab icons with iOS-style icons</string>
     <string name="glass_tab_bar">Glass Tab Bar</string>

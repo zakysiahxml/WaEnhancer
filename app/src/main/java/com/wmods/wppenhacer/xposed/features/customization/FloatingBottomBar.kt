@@ -2,6 +2,7 @@ package com.wmods.wppenhacer.xposed.features.customization
 
 import android.content.SharedPreferences
 import android.graphics.Color
+import android.graphics.Outline
 import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.Drawable
 import android.graphics.drawable.GradientDrawable
@@ -37,7 +38,7 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
         private const val BUILTIN_STROKE_WIDTH_DP = 1.5f
         // Nilai kaca iOS (toggle "Bar Kaca iOS"): bar lebih transparan,
         // outline lebih tipis & halus.
-        private const val GLASS_BACKGROUND_ALPHA = 0.70f
+        private const val GLASS_BACKGROUND_ALPHA = 0.45f
         private const val GLASS_STROKE_ALPHA = 0.15f
         private const val GLASS_STROKE_WIDTH_DP = 1f
         private const val FAB_GAP_DP = 8f
@@ -282,15 +283,44 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
         // / native lib gagal / bar bukan FrameLayout), fallback ke
         // GlassBarBlur (blur bitmap sendiri).
         if (isGlass()) {
-            bar.post { installLiquidGlass(bar, bar.rootView) }
+            bar.post { tryInstallLiquidGlass(bar, 0) }
         }
+        // Jarak antar ikon (setting "Icon Spacing").
+        bar.post { applyIconSpacing(bar) }
     }
 
     /**
-     * Pasang LiquidGlassView di bar bawah. Dipanggil sekali per bar.
+     * Pasang LiquidGlassView di bar bawah, dengan backdrop (RecyclerView
+     * chat) yang dicari berulang. Saat bar pertama di-style, RecyclerView
+     * kadang belum nempel di tree — kalau kaca dipasang tanpa backdrop,
+     * library jatuh ke parent (bar itu sendiri) dan yang ke-blur malah
+     * isi bar (pil biru + badge): itu sumber coreng biru aneh di kaca.
+     * Kalau sesudah 10x coba backdrop tetap tidak ketemu, fallback ke
+     * GlassBarBlur (menyembunyikan bar saat capture, jadi tidak ada
+     * coreng biru).
+     */
+    private fun tryInstallLiquidGlass(bar: ViewGroup, attempt: Int) {
+        if (bar.getChildAt(0) is LiquidGlassView) return
+        val backdrop = findRecyclerView(bar.rootView)
+        if (backdrop == null) {
+            if (attempt < 10) {
+                bar.postDelayed({ tryInstallLiquidGlass(bar, attempt + 1) }, 300L)
+            } else {
+                val radiusDp = xprefs.getInt(
+                    "floating_bottom_bar_radius", CORNER_RADIUS_DP.toInt()
+                ).toFloat()
+                bar.post { GlassBarBlur.applyBlur(bar, radiusDp) }
+            }
+            return
+        }
+        installLiquidGlass(bar, backdrop)
+    }
+
+    /**
+     * Pasang LiquidGlassView dengan [backdrop] yang sudah ketemu.
      * Mengembalikan true kalau kaca terpasang, false kalau fallback.
      */
-    private fun installLiquidGlass(bar: ViewGroup, rootView: View): Boolean {
+    private fun installLiquidGlass(bar: ViewGroup, backdrop: View): Boolean {
         val radiusDp = xprefs.getInt(
             "floating_bottom_bar_radius", CORNER_RADIUS_DP.toInt()
         ).toFloat()
@@ -303,14 +333,15 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
                     ViewGroup.LayoutParams.MATCH_PARENT
                 )
                 cornerRadius = Utils.dipToPixels(radiusDp).toFloat()
-                material = GlassMaterial.REGULAR
+                material = GlassMaterial.CLEAR
                 enableDynamicBackground = true
                 enableSensorHighlight = true
                 enableAdaptiveTint = true
-                // Warna blur disamain referensi: abu-abu gelap kebiruan.
-                setGlassTint(0xFF2E3B42.toInt(), 0.40f)
+                // Kaca harus TEMBUS seperti referensi: tint terang tipis
+                // supaya teks chat di belakang bar tetap kelihatan nge-blur.
+                setGlassTint(0xFF9AA7B2.toInt(), 0.15f)
                 // Backdrop = RecyclerView chat di belakang bar.
-                backdropSource = findRecyclerView(rootView)
+                backdropSource = backdrop
             }
             // Bar jadi transparan, kacanya yang ngegambar.
             bar.background = null
@@ -338,6 +369,45 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
         return null
     }
 
+    /**
+     * Jarak antar ikon tab: kasih margin kiri-kanan ke MenuView supaya
+     * ikon lebih mepet ke tengah. Nilai dari setting "Icon Spacing" (dp).
+     */
+    private fun applyIconSpacing(bar: ViewGroup) {
+        try {
+            val menuView = findMenuView(bar) ?: return
+            val spacingPx = Utils.dipToPixels(
+                xprefs.getInt("floating_bottom_bar_icon_spacing", 16).toFloat()
+            )
+            val params = menuView.layoutParams as? ViewGroup.MarginLayoutParams ?: return
+            if (params.leftMargin != spacingPx || params.rightMargin != spacingPx) {
+                params.leftMargin = spacingPx
+                params.rightMargin = spacingPx
+                menuView.layoutParams = params
+            }
+        } catch (e: Throwable) {
+            log(e)
+        }
+    }
+
+    /**
+     * Bikin tombol aksi mengambang (Meta AI + chat baru) jadi BULET:
+     * potong tampilan view jadi oval. Background asli (termasuk ripple)
+     * tidak diganti, cuma bentuk luarnya yang dipotong.
+     */
+    private fun roundFab(fab: View) {
+        try {
+            fab.outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) {
+                    outline.setOval(0, 0, view.width, view.height)
+                }
+            }
+            fab.clipToOutline = true
+        } catch (e: Throwable) {
+            log(e)
+        }
+    }
+
     private fun stripBottomInset(bar: ViewGroup) {
         val basePadding = baseBottomPadding.getOrPut(bar) {
             (bar.paddingBottom - navigationBarInset(bar)).coerceAtLeast(0)
@@ -359,6 +429,7 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
         }
         bar.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             stripBottomInset(bar)
+            applyIconSpacing(bar)
             val params = bar.layoutParams
             if (params != null && params.height != ViewGroup.LayoutParams.WRAP_CONTENT) {
                 params.height = ViewGroup.LayoutParams.WRAP_CONTENT
@@ -479,6 +550,7 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
             rootView.findViewById<View>(id)?.let { fab ->
                 fab.translationY = offset
                 bringToFrontIfNeeded(fab)
+                roundFab(fab)
             }
         }
     }
@@ -499,6 +571,7 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
 
         fab.translationY = -(barHeight + Utils.dipToPixels(FAB_GAP_DP)).toFloat()
         bringToFrontIfNeeded(fab)
+        roundFab(fab)
     }
 
     private fun bringToFrontIfNeeded(view: View) {
