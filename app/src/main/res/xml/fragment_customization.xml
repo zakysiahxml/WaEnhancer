@@ -231,6 +231,12 @@
             app:title="@string/floating_bottom_bar_active_pill" />
 
         <rikka.material.preference.MaterialSwitchPreference
+            app:dependency="floating_bottom_bar"
+            app:key="glass_tab_bar"
+            app:summary="@string/glass_tab_bar_sum"
+            app:title="@string/glass_tab_bar" />
+
+        <rikka.material.preference.MaterialSwitchPreference
             app:key="ios_tab_bar"
             app:summary="@string/ios_tab_bar_sum"
             app:title="@string/ios_tab_bar" />

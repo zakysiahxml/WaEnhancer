@@ -40,8 +40,8 @@ android {
         minSdk = 28
         //noinspection OldTargetApi
         targetSdk = 34
-        versionCode = 164
-        versionName = "1.6.4 ($gitHash)"
+        versionCode = 163
+        versionName = "1.6.3 ($gitHash)"
         multiDexEnabled = true
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -207,6 +207,9 @@ dependencies {
     implementation(libs.arscblamer)
     implementation(libs.markwon.core)
     implementation(libs.androidx.datastore.preferences)
+    // Liquid Glass (QWEA0/Liquid-Glass-Android, MIT) — kaca beneran buat
+    // bar bawah + header chat. JitPack sudah ada di settings.gradle.kts.
+    implementation("com.github.QWEA0:liquidglass:v2.0.11")
 }
 
 

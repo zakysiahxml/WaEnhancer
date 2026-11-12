@@ -188,7 +188,9 @@
     <string name="floating_bottom_bar_radius">Bottom Bar Corner Radius</string>
     <string name="floating_bottom_bar_radius_sum">Adjust the border radius of the floating bottom bar</string>
     <string name="ios_tab_bar">iOS Tab Bar</string>
-    <string name="ios_tab_bar_sum">Replace home tab icons with iOS-style icons (from DELTA iOS component pack)</string>
+    <string name="ios_tab_bar_sum">Replace home tab icons with iOS-style icons</string>
+    <string name="glass_tab_bar">Glass Tab Bar</string>
+    <string name="glass_tab_bar_sum">iOS-style frosted glass bottom bar: real blur of the chat list behind it, thin outline, dark active-tab pill</string>
     <string name="disable_swipe_up_in_group">Disable swipe up gesture in groups</string>
     <string name="disable_swipe_up_in_group_sum">Disables the swipe up gesture in group chats</string>
     <string name="selection_of_call_type">Enable selection of call type</string>

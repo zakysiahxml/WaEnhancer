@@ -11,7 +11,7 @@ import com.wmods.wppenhacer.xposed.core.devkit.Unobfuscator
 
 /**
  * Tab Bar iOS (tier 3, bagian 1): ganti ikon tab beranda WA dengan ikon iOS
- * dari paket komponen DELTA (delta_ios_tab_*.png + selector home_tab_*_selector_ios.xml).
+ * ikon gaya iOS (zky_ios_tab_*.png + selector zky_home_tab_*_selector_ios.xml).
  *
  * Cara kerja — meniru SeparateGroup.hookTabIcon():
  * - hook loadIconTabMethod (flag ON sebelum, OFF sesudah) + loadAddMenuAndroidX
@@ -30,8 +30,8 @@ import com.wmods.wppenhacer.xposed.core.devkit.Unobfuscator
  * - Tab yang tidak dikenal dibiarkan berikon bawaan + dicatat lewat logDebug,
  *   jadi tidak akan crash.
  *
- * Catatan: file XML layout & smali dari paket DELTA TIDAK dipakai di sini
- * (layout itu merujuk class id.deltalabs.* / com.whatsapp.yo.* yang tidak ada
+ * Catatan: file XML layout & smali dari paket komponen TIDAK dipakai di sini
+ * (layout itu merujuk class yang tidak ada di WA resmi
  * di WA official — di-inflate di modul = crash). Yang dipakai ulang hanya
  * aset gambarnya (PNG + selector), logikanya ditulis ulang sebagai hook.
  */
@@ -83,9 +83,9 @@ class IosTabBar(loader: ClassLoader, preferences: SharedPreferences) :
 
     private fun selectorForTab(tabId: Int): Int? {
         return when (tabId) {
-            SeparateGroup.CHATS -> R.drawable.home_tab_chats_selector_ios
-            SeparateGroup.STATUS -> R.drawable.home_tab_status_selector_ios
-            SeparateGroup.GROUPS -> R.drawable.home_tab_communities_selector_ios
+            SeparateGroup.CHATS -> R.drawable.zky_home_tab_chats_selector_ios
+            SeparateGroup.STATUS -> R.drawable.zky_home_tab_status_selector_ios
+            SeparateGroup.GROUPS -> R.drawable.zky_home_tab_communities_selector_ios
             else -> selectorForTabByPosition(tabId)
         }
     }
@@ -104,8 +104,8 @@ class IosTabBar(loader: ClassLoader, preferences: SharedPreferences) :
         val communitiesIndex = if (hasGroups) 3 else 2
         val callsIndex = if (hasGroups) 4 else 3
         return when (index) {
-            communitiesIndex -> R.drawable.home_tab_communities_selector_ios
-            callsIndex -> R.drawable.home_tab_calls_selector_ios
+            communitiesIndex -> R.drawable.zky_home_tab_communities_selector_ios
+            callsIndex -> R.drawable.zky_home_tab_calls_selector_ios
             else -> {
                 logDebug("IosTabBar: tab id $tabId (index $index) tidak dikenal, ikon dibiarkan bawaan")
                 null

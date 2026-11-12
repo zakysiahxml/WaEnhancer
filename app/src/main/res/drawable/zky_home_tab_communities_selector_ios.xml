@@ -3,8 +3,8 @@
     xmlns:android="http://schemas.android.com/apk/res/android">
     <item
         android:state_checked="true"
-        android:drawable="@drawable/delta_ios_tab_selected_chat" />
+        android:drawable="@drawable/zky_ios_tab_selected_group" />
     <item
         android:state_checked="false"
-        android:drawable="@drawable/delta_ios_tab_chat" />
+        android:drawable="@drawable/zky_ios_tab_group" />
 </selector>

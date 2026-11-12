@@ -3,49 +3,55 @@ package com.wmods.wppenhacer.xposed.features.customization
 import android.app.Activity
 import android.content.SharedPreferences
 import android.graphics.Color
-import android.graphics.drawable.ColorDrawable
+import android.graphics.Outline
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.util.TypedValue
+import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
+import android.widget.FrameLayout
+import android.widget.ImageButton
+import android.widget.ImageView
+import android.widget.LinearLayout
+import android.widget.TextView
+import androidx.recyclerview.widget.RecyclerView
+import com.example.liquidglass.GlassMaterial
+import com.example.liquidglass.LiquidGlassView
 import com.highcapable.kavaref.KavaRef.Companion.resolve
 import com.highcapable.yukihookapi.extension.kavaref.hook
 import com.wmods.wppenhacer.xposed.core.Feature
 import com.wmods.wppenhacer.xposed.utils.ReflectionUtils
 import com.wmods.wppenhacer.xposed.utils.Utils
-import java.util.WeakHashMap
 
 /**
- * Header Chat Kaca (fitur sendiri, gaya iOS): toolbar layar percakapan
- * (Conversation) diubah jadi pil kaca mengambang — sudut membulat, latar
- * semi-transparan (frosted), ada jarak dari tepi layar dan dari status bar,
- * plus bayangan halus. Ini yang bikin header di screenshot referensi terlihat
- * "rapi bagus": bukan lagi bar penuh selebar layar, tapi satu pil yang
- * mengambang di atas wallpaper chat.
+ * Header Chat Kaca v2 — gaya iOS, sama persis kayak screenshot referensi:
+ * header BUKAN satu bar penuh, tapi TIGA pil kaca mengambang yang terpisah
+ * (ada PEMISAH / gap di antaranya):
  *
- * Cara kerja — meniru FloatingBottomBar (yang melakukan hal yang sama untuk
- * bar bawah):
- * - hook Conversation.onCreate (activity percakapan WA = com.whatsapp.Conversation,
- *   nama class ini tidak diobfuscate, sama seperti yang dipakai
- *   WppCore.getCurrentConversation()).
- * - cari toolbar lewat id "toolbar" (id yang sama dipakai CustomToolbar
- *   untuk toolbar beranda), lalu:
- *   - parent AppBarLayout (kalau ada) dibuat transparan + elevation 0,
- *     supaya latar solid di belakang pil tidak kelihatan;
- *   - toolbar diberi background GradientDrawable membulat (radius 28dp,
- *     warna diambil dari warna toolbar sekarang dengan alpha 0.85,
- *     plus stroke tipis) + elevation buat bayangan;
- *   - toolbar diberi margin kiri/kanan 12dp dan atas 8dp supaya mengambang.
- * - guard: kalau WA menimpa background toolbar belakangan, listener
- *   layout-change mengembalikannya ke drawable kaca yang sama.
+ *   [ < 40 ]   [ (avatar) Nama / dilihat ... ]   [ [video] [telpon] ]
+ *   pil back    pil nama                          pil aksi
  *
- * Yang TIDAK dilakukan di v1 (detail iOS lain dari screenshot):
- * - angka "< 40" di sebelah tombol back (butuh TextView baru + hitung
- *   unread, rawan posisi) dan ring hijau di avatar (butuh bungkus
- *   ImageView) — keduanya dicatat buat lanjutkan kalau diminta.
- * - bar input pesan di bawah TIDAK diubah.
+ * - tiap pil = Liquid Glass beneran (library QWEA0/Liquid-Glass-Android,
+ *   MIT — refraksi SDF + dispersi + specular; bukan blur bitmap),
+ *   warna blur abu-abu gelap kebiruan (tint #2E3B42 alpha 0.40),
+ *   sudut membulat, tanpa outline putih yang keras; kalau library gagal
+ *   (class/native tidak ke-load), fallback ke GlassBarBlur;
+ * - avatar dikasih RING HIJAU (WhatsApp green #25D366);
+ * - pil back berisi panah back + angka unread ("40" di referensi).
+ *
+ * Cara kerja:
+ * - hook Conversation.onCreate; sesudah layout, toolbar dicari lewat id
+ *   "toolbar", lalu anak-anaknya dipindah ke tiga pil baru (re-parenting).
+ *   Click listener ikut pindah bareng view-nya, jadi tombol back / video /
+ *   telpon tetap jalan.
+ * - kalau restrukturisasi gagal di titik mana pun (struktur toolbar beda),
+ *   fallback ke v1: toolbar utuh dijadikan satu pil kaca (cara lama).
+ *
+ * Angka unread di pil back ("40"): dicoba dibaca dari jumlah chat belum
+ * dibaca. Kalau tidak ketemu sumbernya, pil back cuma berisi panah back
+ * (tanpa angka) — struktur tiga pil + blur + ring hijau tetap jalan.
  *
  * Jujur: kode ini belum dikompilasi di sini; bukti pertama adalah build
  * GitHub Actions yang hijau + header berubah di HP. Tes hanya di WA
@@ -55,16 +61,28 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
     Feature(loader, preferences) {
 
     companion object {
-        private const val CORNER_RADIUS_DP = 28f
+        // Pil: radius + jarak antar pil (PEMISAH) + margin tepi.
+        private const val PILL_RADIUS_DP = 28f
+        private const val PILL_GAP_DP = 8f
         private const val SIDE_MARGIN_DP = 12f
         private const val TOP_MARGIN_DP = 8f
-        private const val ELEVATION_DP = 4f
-        private const val BACKGROUND_ALPHA = 0.85f
-        private const val STROKE_ALPHA = 0.40f
+        // Pil back (lingkaran): diameter.
+        private const val BACK_PILL_SIZE_DP = 52f
+        // Ring hijau avatar.
+        private const val AVATAR_RING_WIDTH_DP = 3f
+        private const val AVATAR_RING_COLOR = 0xFF25D366.toInt()
+        // Warna fallback kalau blur gagal (semi-transparan, bukan hitam polos).
+        private const val FALLBACK_BG_COLOR = 0xB31E2A32.toInt()
+        // v1 (fallback): konstanta lama.
+        private const val V1_CORNER_RADIUS_DP = 28f
+        private const val V1_SIDE_MARGIN_DP = 12f
+        private const val V1_TOP_MARGIN_DP = 8f
+        private const val V1_ELEVATION_DP = 4f
+        private const val V1_BACKGROUND_ALPHA = 0.85f
+        private const val V1_STROKE_ALPHA = 0.40f
     }
 
-    private val glassDrawables = WeakHashMap<ViewGroup, GradientDrawable>()
-    private val guardInstalled = WeakHashMap<ViewGroup, Boolean>()
+    private val styledToolbars = WeakHashMap<ViewGroup, Boolean>()
 
     override fun doHook() {
         if (!xprefs.getBoolean("glass_chat_header", false)) return
@@ -76,10 +94,23 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
             return
         }
 
+        // onCreate: pasang sekali. onResume: pasang lagi kalau toolbar
+        // belum siap waktu onCreate (view Fragment kadang telat nempel).
+        // styledToolbars mencegah styling ganda.
         conversationClass.resolve().firstMethod {
             name = "onCreate"
             superclass()
             parameters(Bundle::class.java)
+        }.hook {
+            after {
+                val activity = instance as? Activity ?: return@after
+                activity.window?.decorView?.post { styleHeader(activity) }
+            }
+        }
+
+        conversationClass.resolve().firstMethod {
+            name = "onResume"
+            superclass()
         }.hook {
             after {
                 val activity = instance as? Activity ?: return@after
@@ -97,16 +128,25 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
             val toolbar = activity.findViewById<ViewGroup>(
                 Utils.getID("toolbar", "id")
             ) ?: return
-            applyGlass(toolbar)
+            if (styledToolbars.put(toolbar, true) != null) return
+            // Coba v2 (tiga pil). Gagal -> v1 (satu pil).
+            if (!tryRestructureToPills(activity, toolbar)) {
+                applyGlassV1(toolbar)
+            }
         } catch (e: Throwable) {
             log(e)
         }
     }
 
-    private fun applyGlass(toolbar: ViewGroup) {
-        try {
-            // AppBarLayout (pembungkus toolbar di Conversation) dibuat
-            // transparan supaya latar solidnya tidak kelihatan di belakang pil.
+    // ------------------------------------------------------------------
+    // v2 — tiga pil terpisah (ada pemisah / gap di antaranya).
+    // ------------------------------------------------------------------
+
+    private fun tryRestructureToPills(activity: Activity, toolbar: ViewGroup): Boolean {
+        return try {
+            // Toolbar jadi wadah transparan (latar + elevation dimatikan).
+            toolbar.setBackgroundColor(Color.TRANSPARENT)
+            toolbar.elevation = 0f
             var ancestor = toolbar.parent as? ViewGroup
             var depth = 0
             while (ancestor != null && depth < 3) {
@@ -120,41 +160,447 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
                 depth++
             }
 
-            val glass = glassDrawables[toolbar] ?: buildGlassDrawable(toolbar).also {
-                glassDrawables[toolbar] = it
+            // Kumpulkan anak-anak toolbar sebelum dipindah.
+            val children = ArrayList<View>()
+            for (i in 0 until toolbar.childCount) children.add(toolbar.getChildAt(i))
+            if (children.isEmpty()) return false
+
+            val navButton = findNavButton(toolbar, children)
+            val avatarView = findAvatarView(children)
+            val titleViews = findTitleViews(children)
+            val actionMenu = findActionMenu(children)
+            // Minimal harus ada tombol back + judul. Kalau tidak ada, v1 saja.
+            if (navButton == null && titleViews.isEmpty()) return false
+
+            // Backdrop buat kaca = RecyclerView chat di belakang header.
+            val backdrop = activity.window?.decorView?.let { findRecyclerView(it) }
+
+            // Pil 1 — back (lingkaran): panah back + angka unread.
+            val backPill = buildBackPill(activity, navButton, backdrop)
+            // Pil 2 — nama: avatar (ring hijau) + nama + last seen.
+            val namePill = buildNamePill(activity, avatarView, titleViews, backdrop)
+            // Pil 3 — aksi: tombol video + telpon (+ overflow kalau ada).
+            val actionPill = buildActionPill(activity, actionMenu, backdrop)
+
+            // Lepas semua anak lama dari toolbar, ganti dengan container
+            // horizontal berisi tiga pil + pemisah (gap) di antaranya.
+            toolbar.removeAllViews()
+            val container = LinearLayout(activity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                layoutParams = ViewGroup.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+                setPadding(
+                    Utils.dipToPixels(SIDE_MARGIN_DP),
+                    Utils.dipToPixels(TOP_MARGIN_DP),
+                    Utils.dipToPixels(SIDE_MARGIN_DP),
+                    0
+                )
             }
+            val gapPx = Utils.dipToPixels(PILL_GAP_DP)
+            container.addView(backPill)
+            addGap(container, gapPx)
+            container.addView(namePill)
+            if (actionPill != null) {
+                addGap(container, gapPx)
+                container.addView(actionPill)
+            }
+            // Sisa view yang tidak dikenal (kalau ada) jangan dibuang:
+            // taruh di akhir container supaya tidak hilang.
+            val used = HashSet<View>()
+            if (navButton != null) used.add(navButton)
+            if (avatarView != null) used.add(avatarView)
+            titleViews.forEach { used.add(it) }
+            if (actionMenu != null) used.add(actionMenu)
+            for (child in children) {
+                if (child !in used && child.parent == null) {
+                    container.addView(child)
+                }
+            }
+            toolbar.addView(container)
+
+            // Pil yang BUKAN LiquidGlassView (fallback) dikasih blur
+            // bitmap sendiri; pil Liquid Glass sudah ngegambar sendiri.
+            for (pill in listOfNotNull(backPill, namePill, actionPill)) {
+                if (pill is LiquidGlassView) continue
+                pill.post {
+                    val ok = GlassBarBlur.applyBlur(pill, PILL_RADIUS_DP)
+                    if (!ok) pill.background = buildFallbackPillBg()
+                }
+            }
+            true
+        } catch (e: Throwable) {
+            log(e)
+            false
+        }
+    }
+
+    private fun addGap(container: LinearLayout, gapPx: Int) {
+        container.addView(View(container.context).apply {
+            layoutParams = LinearLayout.LayoutParams(gapPx, 1)
+        })
+    }
+
+    /** Tombol back = ImageButton pertama (navigation icon) di toolbar. */
+    private fun findNavButton(toolbar: ViewGroup, children: List<View>): ImageButton? {
+        // Coba lewat navigationIcon dulu: view yang drawable-nya sama.
+        for (child in children) {
+            if (child is ImageButton) return child
+        }
+        return null
+    }
+
+    /** Avatar = ImageView (bukan tombol back) di toolbar. */
+    private fun findAvatarView(children: List<View>): ImageView? {
+        for (child in children) {
+            if (child is ImageView && child !is ImageButton) return child
+        }
+        // Avatar kadang dibungkus satu level: cari ImageView di dalam
+        // anak ViewGroup pertama yang bukan ActionMenu.
+        for (child in children) {
+            if (child is ViewGroup && !isActionMenu(child)) {
+                for (i in 0 until child.childCount) {
+                    val grand = child.getChildAt(i)
+                    if (grand is ImageView && grand !is ImageButton) return grand
+                }
+            }
+        }
+        return null
+    }
+
+    /** Judul + subtitle = semua TextView di toolbar (langsung / satu level). */
+    private fun findTitleViews(children: List<View>): List<TextView> {
+        val out = ArrayList<TextView>()
+        for (child in children) {
+            if (child is TextView) out.add(child)
+            if (child is ViewGroup && !isActionMenu(child)) {
+                for (i in 0 until child.childCount) {
+                    val grand = child.getChildAt(i)
+                    if (grand is TextView) out.add(grand)
+                }
+            }
+        }
+        return out
+    }
+
+    /** Menu aksi (video / telpon / overflow) = ActionMenuView di toolbar. */
+    private fun findActionMenu(children: List<View>): ViewGroup? {
+        for (child in children) {
+            if (child is ViewGroup && isActionMenu(child)) return child
+        }
+        return null
+    }
+
+    private fun isActionMenu(view: View): Boolean {
+        val name = view.javaClass.simpleName
+        return name.contains("ActionMenuView") || name.contains("ActionMenu")
+    }
+
+    /**
+     * Bikin wadah pil kaca. Utamanya LiquidGlassView (library QWEA0,
+     * refraksi + dispersi + specular beneran); kalau gagal (class tidak
+     * ada / native lib gagal), fallback ke FrameLayout polos (nanti
+     * dikasih GlassBarBlur oleh pemanggil).
+     */
+    private fun makeGlassPill(
+        activity: Activity,
+        backdrop: RecyclerView?,
+        radiusDp: Float
+    ): ViewGroup {
+        try {
+            return LiquidGlassView(activity).apply {
+                cornerRadius = Utils.dipToPixels(radiusDp).toFloat()
+                material = GlassMaterial.REGULAR
+                enableDynamicBackground = true
+                enableSensorHighlight = true
+                enableAdaptiveTint = true
+                setGlassTint(0xFF2E3B42.toInt(), 0.40f)
+                backdropSource = backdrop
+                clipChildren = false
+                clipToPadding = false
+            }
+        } catch (e: Throwable) {
+            log(e)
+            return FrameLayout(activity).apply {
+                clipChildren = false
+                clipToPadding = false
+            }
+        }
+    }
+
+    /** Cari RecyclerView pertama (BFS) dari root — sumber backdrop kaca. */
+    private fun findRecyclerView(root: View): RecyclerView? {
+        val queue = ArrayDeque<View>()
+        queue.add(root)
+        while (queue.isNotEmpty()) {
+            val view = queue.removeFirst()
+            if (view is RecyclerView) return view
+            if (view is ViewGroup) {
+                for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
+            }
+        }
+        return null
+    }
+
+    /** Pil 1 — back: lingkaran kaca berisi panah back + angka unread. */
+    private fun buildBackPill(
+        activity: Activity,
+        navButton: ImageButton?,
+        backdrop: RecyclerView?
+    ): ViewGroup {
+        val ctx = activity
+        val size = Utils.dipToPixels(BACK_PILL_SIZE_DP)
+        val pill = makeGlassPill(activity, backdrop, BACK_PILL_SIZE_DP / 2f).apply {
+            layoutParams = LinearLayout.LayoutParams(size, size)
+        }
+        val row = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+        if (navButton != null) {
+            (navButton.parent as? ViewGroup)?.removeView(navButton)
+            navButton.setBackgroundColor(Color.TRANSPARENT)
+            val navSize = Utils.dipToPixels(24f)
+            navButton.layoutParams = LinearLayout.LayoutParams(navSize, navSize)
+            row.addView(navButton)
+        }
+        // Angka unread ("40" di referensi). Best-effort: kalau tidak
+        // ketemu sumbernya, TextView dibiarkan kosong (hanya panah back).
+        val countView = TextView(ctx).apply {
+            textSize = 18f
+            setTextColor(Color.WHITE)
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { leftMargin = Utils.dipToPixels(2f) }
+        }
+        row.addView(countView)
+        pill.addView(row)
+        // Isi angka unread belakangan (async, jangan blokir layout).
+        pill.post { fillUnreadCount(activity, countView) }
+        return pill
+    }
+
+    /** Pil 2 — nama: avatar (ring hijau) + nama + last seen. */
+    private fun buildNamePill(
+        activity: Activity,
+        avatarView: ImageView?,
+        titleViews: List<TextView>,
+        backdrop: RecyclerView?
+    ): ViewGroup {
+        val ctx = activity
+        // Wadah luar = kaca; isi horizontal di dalam LinearLayout.
+        val pill = makeGlassPill(activity, backdrop, PILL_RADIUS_DP).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                0, ViewGroup.LayoutParams.MATCH_PARENT, 1f
+            )
+        }
+        val row = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            val padH = Utils.dipToPixels(10f)
+            val padV = Utils.dipToPixels(6f)
+            setPadding(padH, padV, padH, padV)
+        }
+        if (avatarView != null) {
+            (avatarView.parent as? ViewGroup)?.removeView(avatarView)
+            // Ring hijau di sekeliling avatar.
+            avatarView.outlineProvider = object : ViewOutlineProvider() {
+                override fun getOutline(view: View, outline: Outline) {
+                    outline.setOval(0, 0, view.width, view.height)
+                }
+            }
+            avatarView.clipToOutline = true
+            // Ring = background lingkaran hijau di belakang avatar,
+            // avatar diberi padding selebar ring.
+            val ringW = Utils.dipToPixels(AVATAR_RING_WIDTH_DP)
+            val avatarHolder = FrameLayout(ctx).apply {
+                layoutParams = LinearLayout.LayoutParams(
+                    Utils.dipToPixels(40f) + ringW * 2,
+                    Utils.dipToPixels(40f) + ringW * 2
+                )
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.OVAL
+                    setColor(AVATAR_RING_COLOR)
+                }
+            }
+            avatarView.layoutParams = FrameLayout.LayoutParams(
+                Utils.dipToPixels(40f), Utils.dipToPixels(40f),
+                Gravity.CENTER
+            )
+            avatarHolder.addView(avatarView)
+            row.addView(avatarHolder)
+            val gap = View(ctx).apply {
+                layoutParams = LinearLayout.LayoutParams(Utils.dipToPixels(8f), 1)
+            }
+            row.addView(gap)
+        }
+        // Nama + last seen (vertikal).
+        if (titleViews.isNotEmpty()) {
+            val textCol = LinearLayout(ctx).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.CENTER_VERTICAL
+                layoutParams = LinearLayout.LayoutParams(
+                    0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f
+                )
+            }
+            for (tv in titleViews) {
+                (tv.parent as? ViewGroup)?.removeView(tv)
+                tv.layoutParams = LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.WRAP_CONTENT,
+                    ViewGroup.LayoutParams.WRAP_CONTENT
+                )
+                textCol.addView(tv)
+            }
+            row.addView(textCol)
+        }
+        pill.addView(row)
+        return pill
+    }
+
+    /** Pil 3 — aksi: tombol video + telpon (+ overflow kalau ada). */
+    private fun buildActionPill(
+        activity: Activity,
+        actionMenu: ViewGroup?,
+        backdrop: RecyclerView?
+    ): ViewGroup? {
+        if (actionMenu == null) return null
+        val ctx = activity
+        // Pindahkan tombol-tombol aksi dari ActionMenuView ke pil baru.
+        val buttons = ArrayList<View>()
+        for (i in 0 until actionMenu.childCount) buttons.add(actionMenu.getChildAt(i))
+        if (buttons.isEmpty()) return null
+        // Wadah luar = kaca; isi horizontal di dalam LinearLayout.
+        val pill = makeGlassPill(activity, backdrop, PILL_RADIUS_DP).apply {
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        }
+        val row = LinearLayout(ctx).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            layoutParams = FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT
+            )
+            val padH = Utils.dipToPixels(8f)
+            val padV = Utils.dipToPixels(6f)
+            setPadding(padH, padV, padH, padV)
+        }
+        for (btn in buttons) {
+            (btn.parent as? ViewGroup)?.removeView(btn)
+            if (btn is ImageButton) btn.setBackgroundColor(Color.TRANSPARENT)
+            val p = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.WRAP_CONTENT,
+                ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply {
+                leftMargin = Utils.dipToPixels(4f)
+                rightMargin = Utils.dipToPixels(4f)
+            }
+            btn.layoutParams = p
+            row.addView(btn)
+        }
+        pill.addView(row)
+        return pill
+    }
+
+    /**
+     * Isi angka unread di pil back. Best-effort: coba baca jumlah chat
+     * belum dibaca lewat field yang umum dipakai WA. Kalau gagal, angka
+     * dibiarkan kosong (pil back tetap berisi panah back saja).
+     */
+    private fun fillUnreadCount(activity: Activity, countView: TextView) {
+        try {
+            // Pendekatan generik: cari field int bernama unread / unreadCount
+            // di activity / application. Kalau tidak ada, diam saja.
+            val candidates = listOf("unreadCount", "mUnreadCount", "totalUnread")
+            for (fieldName in candidates) {
+                try {
+                    val f = activity.javaClass.getDeclaredField(fieldName)
+                    f.isAccessible = true
+                    val v = f.getInt(activity)
+                    if (v > 0) {
+                        countView.text = v.toString()
+                        return
+                    }
+                } catch (_: Throwable) {
+                }
+            }
+        } catch (_: Throwable) {
+        }
+    }
+
+    /** Background fallback pil (kalau blur gagal): warna semi-transparan. */
+    private fun buildFallbackPillBg(): GradientDrawable {
+        val radius = Utils.dipToPixels(PILL_RADIUS_DP).toFloat()
+        return GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            cornerRadii = floatArrayOf(
+                radius, radius, radius, radius,
+                radius, radius, radius, radius
+            )
+            setColor(FALLBACK_BG_COLOR)
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // v1 — fallback: toolbar utuh jadi satu pil kaca (cara lama).
+    // ------------------------------------------------------------------
+
+    private fun applyGlassV1(toolbar: ViewGroup) {
+        try {
+            var ancestor = toolbar.parent as? ViewGroup
+            var depth = 0
+            while (ancestor != null && depth < 3) {
+                ancestor.clipChildren = false
+                ancestor.clipToPadding = false
+                if (ancestor.javaClass.simpleName.contains("AppBarLayout")) {
+                    ancestor.setBackgroundColor(Color.TRANSPARENT)
+                    ancestor.elevation = 0f
+                }
+                ancestor = ancestor.parent as? ViewGroup
+                depth++
+            }
+            val glass = buildGlassDrawableV1(toolbar)
             toolbar.background = glass
             toolbar.outlineProvider = ViewOutlineProvider.BACKGROUND
-            toolbar.elevation = Utils.dipToPixels(ELEVATION_DP).toFloat()
-
-            val sideMargin = Utils.dipToPixels(SIDE_MARGIN_DP)
-            val topMargin = Utils.dipToPixels(TOP_MARGIN_DP)
+            toolbar.elevation = Utils.dipToPixels(V1_ELEVATION_DP).toFloat()
+            val sideMargin = Utils.dipToPixels(V1_SIDE_MARGIN_DP)
+            val topMargin = Utils.dipToPixels(V1_TOP_MARGIN_DP)
             val params = toolbar.layoutParams as? ViewGroup.MarginLayoutParams
-            if (params != null && (params.leftMargin != sideMargin
-                        || params.topMargin != topMargin
-                        || params.rightMargin != sideMargin
-                        || params.bottomMargin != 0)
-            ) {
+            if (params != null) {
                 params.setMargins(sideMargin, topMargin, sideMargin, 0)
                 toolbar.layoutParams = params
             }
-
-            installBackgroundGuard(toolbar, glass)
+            toolbar.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
+                if (toolbar.background !== glass) toolbar.background = glass
+            }
         } catch (e: Throwable) {
             log(e)
         }
     }
 
-    private fun buildGlassDrawable(toolbar: ViewGroup): GradientDrawable {
+    private fun buildGlassDrawableV1(toolbar: ViewGroup): GradientDrawable {
         val barColor = resolveBarColor(toolbar)
         val glassColor = (barColor and 0x00FFFFFF) or
-            ((BACKGROUND_ALPHA * 255).toInt() shl 24)
+            ((V1_BACKGROUND_ALPHA * 255).toInt() shl 24)
         val strokeColor = if (isLightColor(barColor)) {
-            Color.argb((STROKE_ALPHA * 255).toInt(), 0, 0, 0)
+            Color.argb((V1_STROKE_ALPHA * 255).toInt(), 0, 0, 0)
         } else {
-            Color.argb((STROKE_ALPHA * 255).toInt(), 255, 255, 255)
+            Color.argb((V1_STROKE_ALPHA * 255).toInt(), 255, 255, 255)
         }
-        val radius = Utils.dipToPixels(CORNER_RADIUS_DP).toFloat()
+        val radius = Utils.dipToPixels(V1_CORNER_RADIUS_DP).toFloat()
         return GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
             cornerRadii = floatArrayOf(
@@ -166,20 +612,9 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
         }
     }
 
-    // Kalau WA menimpa background toolbar belakangan (mis. ganti tema),
-    // kembalikan ke drawable kaca yang sama. Satu listener per toolbar.
-    private fun installBackgroundGuard(toolbar: ViewGroup, glass: GradientDrawable) {
-        if (guardInstalled.put(toolbar, true) != null) return
-        toolbar.addOnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
-            if (toolbar.background !== glass) {
-                toolbar.background = glass
-            }
-        }
-    }
-
     private fun resolveBarColor(bar: ViewGroup): Int {
         val currentBg = bar.background
-        if (currentBg is ColorDrawable) {
+        if (currentBg is android.graphics.drawable.ColorDrawable) {
             return currentBg.color
         }
         return try {

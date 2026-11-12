@@ -15,6 +15,9 @@ import android.widget.Checkable
 import android.widget.FrameLayout
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.recyclerview.widget.RecyclerView
+import com.example.liquidglass.GlassMaterial
+import com.example.liquidglass.LiquidGlassView
 import com.wmods.wppenhacer.xposed.core.Feature
 import com.wmods.wppenhacer.xposed.core.ViewHookDispatcher
 import com.wmods.wppenhacer.xposed.utils.Utils
@@ -28,14 +31,24 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
         private const val SIDE_MARGIN_DP = 12f
         private const val BOTTOM_MARGIN_DP = 16f
         private const val ELEVATION_DP = 4f
-        private const val BACKGROUND_ALPHA = 0.90f
-        private const val STROKE_ALPHA = 0.40f
+        // Nilai bawaan Floating Bottom Bar (sebelum ada kaca).
+        private const val BUILTIN_BACKGROUND_ALPHA = 0.90f
+        private const val BUILTIN_STROKE_ALPHA = 0.40f
+        private const val BUILTIN_STROKE_WIDTH_DP = 1.5f
+        // Nilai kaca iOS (toggle "Bar Kaca iOS"): bar lebih transparan,
+        // outline lebih tipis & halus.
+        private const val GLASS_BACKGROUND_ALPHA = 0.70f
+        private const val GLASS_STROKE_ALPHA = 0.15f
+        private const val GLASS_STROKE_WIDTH_DP = 1f
         private const val FAB_GAP_DP = 8f
         // Pil tab aktif (gaya iOS, lihat screenshot referensi): pil gelap di
         // belakang ikon+label tab yang sedang dipilih.
         private const val PILL_RADIUS_DP = 20f
-        private const val PILL_ALPHA = 0.92f
-        private const val PILL_DARKEN = 0.65f
+        // Pil tab aktif: bawaan (toggle pil) vs kaca (lebih gelap & pekat).
+        private const val BUILTIN_PILL_ALPHA = 0.92f
+        private const val BUILTIN_PILL_DARKEN = 0.65f
+        private const val GLASS_PILL_ALPHA = 0.95f
+        private const val GLASS_PILL_DARKEN = 0.50f
         private const val PILL_INSET_H_DP = 4f
         private const val PILL_INSET_V_DP = 6f
         private val FAB_RESOURCE_NAMES = arrayOf("fab", "fab_second", "extended_mini_fab")
@@ -48,6 +61,11 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
     private val pillInstalled = WeakHashMap<ViewGroup, Boolean>()
     private val originalItemBackgrounds = WeakHashMap<View, Drawable?>()
     private val pillDrawables = WeakHashMap<View, Drawable>()
+
+    // Toggle "Bar Kaca iOS" (menu baru, beda dari Floating Bottom Bar bawaan):
+    // kalau nyala, bar pakai tampilan kaca; kalau mati, bar kembali ke
+    // tampilan bawaan Floating Bottom Bar.
+    private fun isGlass(): Boolean = xprefs.getBoolean("glass_tab_bar", false)
 
     override fun doHook() {
         if (!xprefs.getBoolean("floating_bottom_bar", false)) return
@@ -214,12 +232,15 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
         }
 
         val barColor = resolveBarColor(bar)
+        val bgAlpha = if (isGlass()) GLASS_BACKGROUND_ALPHA else BUILTIN_BACKGROUND_ALPHA
+        val strokeAlpha = if (isGlass()) GLASS_STROKE_ALPHA else BUILTIN_STROKE_ALPHA
+        val strokeWidthDp = if (isGlass()) GLASS_STROKE_WIDTH_DP else BUILTIN_STROKE_WIDTH_DP
         val transparentColor = (barColor and 0x00FFFFFF) or
-                ((BACKGROUND_ALPHA * 255).toInt() shl 24)
+                ((bgAlpha * 255).toInt() shl 24)
         val strokeColor = if (isLightColor(barColor)) {
-            Color.argb((STROKE_ALPHA * 255).toInt(), 0, 0, 0)
+            Color.argb((strokeAlpha * 255).toInt(), 0, 0, 0)
         } else {
-            Color.argb((STROKE_ALPHA * 255).toInt(), 255, 255, 255)
+            Color.argb((strokeAlpha * 255).toInt(), 255, 255, 255)
         }
         val radiusDp =
             xprefs.getInt("floating_bottom_bar_radius", CORNER_RADIUS_DP.toInt()).toFloat()
@@ -232,7 +253,7 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
                 radius, radius, radius, radius
             )
             setColor(transparentColor)
-            setStroke(Utils.dipToPixels(1.5f), strokeColor)
+            setStroke(Utils.dipToPixels(strokeWidthDp), strokeColor)
         }
         bar.background = background
         bar.outlineProvider = ViewOutlineProvider.BACKGROUND
@@ -253,6 +274,68 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
 
         stripBottomInset(bar)
         installPaddingGuard(bar)
+
+        // Bar Kaca iOS: kaca beneran pakai library Liquid Glass
+        // (QWEA0/Liquid-Glass-Android, MIT) — LiquidGlassView ditambah
+        // sebagai anak pertama bar (di belakang tab), backdrop-nya
+        // RecyclerView chat di belakang bar. Kalau gagal (class tidak ada
+        // / native lib gagal / bar bukan FrameLayout), fallback ke
+        // GlassBarBlur (blur bitmap sendiri).
+        if (isGlass()) {
+            bar.post { installLiquidGlass(bar, rootView) }
+        }
+    }
+
+    /**
+     * Pasang LiquidGlassView di bar bawah. Dipanggil sekali per bar.
+     * Mengembalikan true kalau kaca terpasang, false kalau fallback.
+     */
+    private fun installLiquidGlass(bar: ViewGroup, rootView: View): Boolean {
+        val radiusDp = xprefs.getInt(
+            "floating_bottom_bar_radius", CORNER_RADIUS_DP.toInt()
+        ).toFloat()
+        try {
+            if (bar !is FrameLayout) return false
+            if (bar.getChildAt(0) is LiquidGlassView) return true
+            val glass = LiquidGlassView(bar.context).apply {
+                layoutParams = FrameLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    ViewGroup.LayoutParams.MATCH_PARENT
+                )
+                cornerRadius = Utils.dipToPixels(radiusDp).toFloat()
+                material = GlassMaterial.REGULAR
+                enableDynamicBackground = true
+                enableSensorHighlight = true
+                enableAdaptiveTint = true
+                // Warna blur disamain referensi: abu-abu gelap kebiruan.
+                setGlassTint(0xFF2E3B42.toInt(), 0.40f)
+                // Backdrop = RecyclerView chat di belakang bar.
+                backdropSource = findRecyclerView(rootView)
+            }
+            // Bar jadi transparan, kacanya yang ngegambar.
+            bar.background = null
+            bar.addView(glass, 0)
+            return true
+        } catch (e: Throwable) {
+            log(e)
+            // Fallback: blur bitmap sendiri.
+            bar.post { GlassBarBlur.applyBlur(bar, radiusDp) }
+            return false
+        }
+    }
+
+    /** Cari RecyclerView pertama (BFS) dari root — sumber backdrop kaca. */
+    private fun findRecyclerView(root: View): RecyclerView? {
+        val queue = ArrayDeque<View>()
+        queue.add(root)
+        while (queue.isNotEmpty()) {
+            val view = queue.removeFirst()
+            if (view is RecyclerView) return view
+            if (view is ViewGroup) {
+                for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
+            }
+        }
+        return null
     }
 
     private fun stripBottomInset(bar: ViewGroup) {
@@ -289,7 +372,7 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
     // screenshot referensi. Tab lain dibiarkan apa adanya (ripple bawaan).
     // Dipasang hanya kalau toggle "floating_bottom_bar_active_pill" nyala.
     private fun installActivePill(bar: ViewGroup) {
-        if (!xprefs.getBoolean("floating_bottom_bar_active_pill", false)) return
+        if (!xprefs.getBoolean("floating_bottom_bar_active_pill", false) && !isGlass()) return
         if (pillInstalled.put(bar, true) != null) {
             applyActivePill(bar)
             return
@@ -353,8 +436,10 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
 
     private fun buildPillDrawable(bar: ViewGroup): Drawable {
         val baseColor = resolveBarColor(bar)
-        val pillColor = darkenColor(baseColor, PILL_DARKEN) and 0x00FFFFFF or
-            ((PILL_ALPHA * 255).toInt() shl 24)
+        val pillDarken = if (isGlass()) GLASS_PILL_DARKEN else BUILTIN_PILL_DARKEN
+        val pillAlpha = if (isGlass()) GLASS_PILL_ALPHA else BUILTIN_PILL_ALPHA
+        val pillColor = darkenColor(baseColor, pillDarken) and 0x00FFFFFF or
+            ((pillAlpha * 255).toInt() shl 24)
         val radius = Utils.dipToPixels(PILL_RADIUS_DP).toFloat()
         val pill = GradientDrawable().apply {
             shape = GradientDrawable.RECTANGLE
