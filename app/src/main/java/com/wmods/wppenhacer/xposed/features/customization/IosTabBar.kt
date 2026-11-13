@@ -1,72 +1,41 @@
 package com.wmods.wppenhacer.xposed.features.customization
 
 import android.content.SharedPreferences
+import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.view.MenuItem
+import com.highcapable.kavaref.KavaRef.Companion.resolve
 import com.highcapable.yukihookapi.extension.kavaref.hook
 import com.wmods.wppenhacer.R
 import com.wmods.wppenhacer.xposed.core.Feature
 import com.wmods.wppenhacer.xposed.core.FeatureLoader
 import com.wmods.wppenhacer.xposed.core.devkit.Unobfuscator
+import com.wmods.wppenhacer.xposed.utils.ReflectionUtils
+import java.lang.ref.WeakReference
+import java.lang.reflect.Method
 
 /**
- * Tab Bar iOS (tier 3, bagian 1): ganti ikon tab beranda WA dengan ikon iOS
- * ikon gaya iOS (zky_ios_tab_*.png + selector zky_home_tab_*_selector_ios.xml).
- *
- * Cara kerja:
- * - hook loadAddMenuAndroidX (setelah menu item tab dibuat, ganti ikonnya).
- *   Setiap menu item yang id-nya dikenal sebagai tab langsung diganti
- *   ikonnya — tanpa flag ThreadLocal (mekanisme flag gagal diam-diam kalau
- *   pembuatan menu tidak terjadi di dalam pemanggilan loadIconTabMethod
- *   atau di thread yang sama, dan ikon tidak pernah berubah).
- * - Ikon diambil dari resource MODUL (FeatureLoader.moduleContext), bukan dari
- *   resource WA — jadi Utils.getID() (resource WA) TIDAK bisa dipakai di sini.
- *   MenuItem.setIcon(Drawable) dipakai, bukan setIcon(int).
- * - Selector XML (state_checked true/false) yang mengatur ikon outline saat
- *   tab tidak aktif dan ikon penuh saat aktif.
- *
- * Pemetaan tab:
- * - CHATS (200), STATUS (300), GROUPS (500) pakai konstanta SeparateGroup.
- * - Komunitas & Panggilan tidak punya konstanta di fork ini, jadi dipetakan
- *   lewat POSISI di daftar tab (urutan bawaan WA: Chat, Pembaruan, Komunitas,
- *   Panggilan; kalau "Pisahkan Grup" aktif, Grup disisipkan di index 1).
- *   Urutan dibaca dari loadTabListMethod; kalau belum tersedia, dipakai
- *   urutan kedatangan menu item (sama urutannya).
- * - Tab yang tidak dikenal dibiarkan berikon bawaan + dicatat lewat logDebug,
- *   jadi tidak akan crash.
- *
- * Catatan: file XML layout & smali dari paket komponen TIDAK dipakai di sini
- * (layout itu merujuk class yang tidak ada di WA resmi
- * di WA official — di-inflate di modul = crash). Yang dipakai ulang hanya
- * aset gambarnya (PNG + selector), logikanya ditulis ulang sebagai hook.
+ * Tab Bar iOS: replace known WhatsApp home-tab icons with the module selectors.
+ * The selected-state selector is reapplied only to the exact MenuItem object
+ * registered for that tab, so WhatsApp's later active-icon update cannot
+ * replace the customized icon or affect the You/profile image.
  */
 class IosTabBar(loader: ClassLoader, preferences: SharedPreferences) :
     Feature(loader, preferences) {
 
-    @Volatile
-    private var tabOrder: List<Int> = emptyList()
+    private data class TrackedTabIcon(
+        val item: WeakReference<MenuItem>,
+        val drawable: Drawable
+    )
 
-    /** Urutan tab sesuai kedatangan menu item (cadangan kalau tabOrder kosong). */
-    @Volatile
-    private var seenTabIds: List<Int> = emptyList()
+    private val trackedTabIcons = mutableListOf<TrackedTabIcon>()
+    private val trackedTabIconsLock = Any()
+    private val hookedSetIconMethods = mutableSetOf<Method>()
+    private val hookedSetIconMethodsLock = Any()
+    private val enforcingIcon = ThreadLocal.withInitial { false }
 
     override fun doHook() {
         if (!xprefs.getBoolean("ios_tab_bar", false)) return
-
-        // Tangkap urutan tab apa adanya (dipakai untuk memetakan
-        // Komunitas/Panggilan yang tidak punya konstanta). Kegagalan di
-        // sini tidak boleh mematikan hook ikon di bawah.
-        try {
-            val tabListMethod = Unobfuscator.loadTabListMethod(classLoader)
-            tabListMethod.hook {
-                after {
-                    @Suppress("UNCHECKED_CAST")
-                    tabOrder = result as? List<Int> ?: emptyList()
-                }
-            }
-        } catch (e: Throwable) {
-            log(e)
-        }
 
         val menuAddAndroidX = try {
             Unobfuscator.loadAddMenuAndroidX(classLoader)
@@ -78,21 +47,25 @@ class IosTabBar(loader: ClassLoader, preferences: SharedPreferences) :
         menuAddAndroidX.hook {
             after {
                 if (args.size <= 2) return@after
-                val tabId = (args[1] as? Int)
-                    ?: (args[1] as? Number)?.toInt()
-                    ?: return@after
-                // Catat urutan kedatangan tab (cadangan kalau tabOrder
-                // kosong). Hanya id kecil seperti konstanta tab (200/300/
-                // 500) — id resource R.id (angka besar) bukan id tab dan
-                // tidak boleh menggeser urutan.
-                if (tabId < 10000 && !seenTabIds.contains(tabId)) {
-                    seenTabIds = seenTabIds + tabId
-                }
+                val tabId = (args[1] as? Number)?.toInt() ?: return@after
                 val menuItem = result as? MenuItem ?: return@after
                 val selectorRes = selectorForTab(tabId) ?: return@after
                 val drawable = loadModuleDrawable(selectorRes) ?: return@after
-                menuItem.setIcon(drawable)
-                logDebug("IosTabBar: ikon tab $tabId diganti")
+
+                rememberTabIcon(menuItem, drawable)
+                try {
+                    hookSetIconFor(menuItem)
+                } catch (e: Throwable) {
+                    log(e)
+                }
+                try {
+                    menuItem.setIcon(drawable)
+                    logDebug("IosTabBar: ikon tab $tabId diganti")
+                } catch (e: Throwable) {
+                    // Keep the rest of the WhatsApp menu usable if an item
+                    // implementation rejects the module drawable.
+                    log(e)
+                }
             }
         }
     }
@@ -101,30 +74,88 @@ class IosTabBar(loader: ClassLoader, preferences: SharedPreferences) :
         return when (tabId) {
             SeparateGroup.CHATS -> R.drawable.zky_home_tab_chats_selector_ios
             SeparateGroup.STATUS -> R.drawable.zky_home_tab_status_selector_ios
-            SeparateGroup.GROUPS -> R.drawable.zky_home_tab_communities_selector_ios
-            else -> selectorForTabByPosition(tabId)
+            CALLS_TAB_ID -> R.drawable.zky_home_tab_calls_selector_ios
+            SeparateGroup.GROUPS ->
+                R.drawable.zky_home_tab_communities_selector_ios
+            else -> {
+                logDebug("IosTabBar: tab id $tabId tidak dikenal, ikon dibiarkan bawaan")
+                null
+            }
         }
     }
 
-    private fun selectorForTabByPosition(tabId: Int): Int? {
-        val order = tabOrder.ifEmpty { seenTabIds }
-        val index = order.indexOf(tabId)
-        if (index == -1) {
-            logDebug("IosTabBar: tab id $tabId tidak ada di daftar tab, ikon dibiarkan bawaan")
-            return null
+    private fun rememberTabIcon(menuItem: MenuItem, drawable: Drawable) {
+        synchronized(trackedTabIconsLock) {
+            trackedTabIcons.removeAll { entry ->
+                val item = entry.item.get()
+                item == null || item === menuItem
+            }
+            trackedTabIcons.add(TrackedTabIcon(WeakReference(menuItem), drawable))
         }
-        // Kalau "Pisahkan Grup" aktif, Grup (500) disisipkan di index 1,
-        // sehingga Komunitas geser ke index 3 dan Panggilan ke index 4.
-        // Kalau tidak aktif, Komunitas di index 2 dan Panggilan di index 3.
-        val hasGroups = order.contains(SeparateGroup.GROUPS)
-        val communitiesIndex = if (hasGroups) 3 else 2
-        val callsIndex = if (hasGroups) 4 else 3
-        return when (index) {
-            communitiesIndex -> R.drawable.zky_home_tab_communities_selector_ios
-            callsIndex -> R.drawable.zky_home_tab_calls_selector_ios
-            else -> {
-                logDebug("IosTabBar: tab id $tabId (index $index) tidak dikenal, ikon dibiarkan bawaan")
-                null
+    }
+
+    private fun trackedDrawableFor(menuItem: Any?): Drawable? {
+        if (menuItem == null) return null
+        synchronized(trackedTabIconsLock) {
+            trackedTabIcons.removeAll { it.item.get() == null }
+            return trackedTabIcons.firstOrNull { it.item.get() === menuItem }?.drawable
+        }
+    }
+
+    /**
+     * Hook both AndroidX MenuItemImpl and the actual returned implementation
+     * when available. The second target is a fallback for wrappers or forks
+     * whose concrete MenuItem class differs; failure leaves the initial v9c
+     * menu-add icon swap intact.
+    */
+    private fun hookSetIconFor(menuItem: MenuItem) {
+        val menuItemImpl = try {
+            ReflectionUtils.findClassIfExists(
+                "androidx.appcompat.view.menu.MenuItemImpl",
+                classLoader
+            )
+        } catch (e: Throwable) {
+            log(e)
+            null
+        }
+        val candidates = listOfNotNull(menuItem.javaClass, menuItemImpl).distinct()
+
+        for (candidate in candidates) {
+            if (!candidate.isAssignableFrom(menuItem.javaClass)) continue
+            try {
+                val method = ReflectionUtils.findMethodExact(
+                    candidate,
+                    "setIcon",
+                    Drawable::class.java
+                )
+                val shouldHook = synchronized(hookedSetIconMethodsLock) {
+                    hookedSetIconMethods.add(method)
+                }
+                if (!shouldHook) continue
+
+                method.hook {
+                    after {
+                        if (enforcingIcon.get()) return@after
+                        val target = instance as? MenuItem ?: return@after
+                        val expected = trackedDrawableFor(target) ?: return@after
+                        val requested = args.firstOrNull() as? Drawable
+                        // Do not replace profile/avatar bitmaps, and do not
+                        // re-enter for the exact selector drawable we set.
+                        if (requested is BitmapDrawable || requested === expected) return@after
+
+                        enforcingIcon.set(true)
+                        try {
+                            target.setIcon(expected)
+                        } catch (e: Throwable) {
+                            log(e)
+                        } finally {
+                            enforcingIcon.remove()
+                        }
+                    }
+                }
+                logDebug("IosTabBar: hook setIcon terpasang pada ${candidate.name}")
+            } catch (e: Throwable) {
+                log(e)
             }
         }
     }
@@ -140,5 +171,12 @@ class IosTabBar(loader: ClassLoader, preferences: SharedPreferences) :
 
     override fun getPluginName(): String {
         return "iOS Tab Bar"
+    }
+
+    private companion object {
+        // Stable WhatsApp tab IDs. These keep role selection independent of
+        // the user's configured tab order and number of visible tabs. IDs not
+        // recognized here (including the You/profile item) remain untouched.
+        const val CALLS_TAB_ID = 400
     }
 }

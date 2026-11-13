@@ -141,7 +141,8 @@ object GlassBarBlur {
             blurred.recycle()
             // Bulatkan sudut (radius ikut skala tangkapan).
             roundBitmap(tinted, Utils.dipToPixels(radiusDp).toFloat() * CAPTURE_SCALE)
-        } catch (_: Throwable) {
+        } catch (e: Throwable) {
+            Log.e(TAG, "captureAndBlur gagal (${e.javaClass.simpleName}): ${e.message}", e)
             null
         }
     }

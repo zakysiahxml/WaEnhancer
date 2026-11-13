@@ -516,6 +516,7 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
                 logDebug(
                     "GlassChatHeader: pil nama [$when_] avatar alpha=${av.alpha} " +
                             "tAlpha=${av.transitionAlpha} vis=${av.visibility} " +
+                            "shown=${av.isShown} layer=${av.layerType} " +
                             "size=${av.width}x${av.height} drawable=${av.drawable != null}"
                 )
             }
@@ -523,6 +524,7 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
                 logDebug(
                     "GlassChatHeader: pil nama [$when_] teks alpha=${tv.alpha} " +
                             "tAlpha=${tv.transitionAlpha} vis=${tv.visibility} " +
+                            "shown=${tv.isShown} layer=${tv.layerType} " +
                             "size=${tv.width}x${tv.height} text='${tv.text}'"
                 )
             }
@@ -546,6 +548,8 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
             view.scaleX = 1f
             view.scaleY = 1f
             view.rotation = 0f
+            view.setLayerType(View.LAYER_TYPE_NONE, null)
+            view.invalidate()
         } catch (e: Throwable) {
             log(e)
         }
@@ -691,7 +695,14 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
         movedNameViews.addAll(titleViews)
         pill.postDelayed(Runnable {
             for (v in movedNameViews) {
-                if (v.alpha < 0.99f || v.transitionAlpha < 0.99f || v.visibility != View.VISIBLE) reviveView(v)
+                if (v.alpha < 0.99f || v.transitionAlpha < 0.99f ||
+                    v.visibility != View.VISIBLE || v.layerType != View.LAYER_TYPE_NONE
+                ) {
+                    reviveView(v)
+                } else {
+                    v.setLayerType(View.LAYER_TYPE_NONE, null)
+                    v.invalidate()
+                }
             }
             logNamePillState(avatarView, titleViews, "sesudah 600ms")
         }, 600)
