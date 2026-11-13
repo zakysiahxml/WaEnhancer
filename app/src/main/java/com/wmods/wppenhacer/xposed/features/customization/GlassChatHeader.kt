@@ -423,12 +423,30 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
                 // Kaca harus TEMBUS seperti referensi: tint terang tipis.
                 setGlassTint(0xFF9AA7B2.toInt(), 0.15f)
                 backdropSource = backdrop
+                // Jaring pengaman VISIBILITAS: di belakang pil header
+                // tidak ada konten (pesan ada DI BAWAH toolbar, bukan
+                // di belakangnya), jadi blur backdrop tidak pernah
+                // kelihatan di sini. Background ini memastikan batas
+                // pil SELALU kelihatan walau kaca library merender
+                // nyaris transparan: isi gelap tembus + garis tepi.
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = Utils.dipToPixels(radiusDp).toFloat()
+                    setColor(0x8C2E3B42.toInt())
+                    setStroke(Utils.dipToPixels(1f), 0x40FFFFFF.toInt())
+                }
                 clipChildren = false
                 clipToPadding = false
             }
         } catch (e: Throwable) {
             log(e)
             return FrameLayout(activity).apply {
+                background = GradientDrawable().apply {
+                    shape = GradientDrawable.RECTANGLE
+                    cornerRadius = Utils.dipToPixels(radiusDp).toFloat()
+                    setColor(0x8C2E3B42.toInt())
+                    setStroke(Utils.dipToPixels(1f), 0x40FFFFFF.toInt())
+                }
                 clipChildren = false
                 clipToPadding = false
             }
@@ -486,10 +504,42 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
      * kosong, pil back + aksi normal karena tidak ikut animasi itu).
      * Setiap view yang dipindah harus dilewatkan sini.
      */
+    /**
+     * Catat keadaan view pil nama (buat diagnosa kalau pil tetap kosong):
+     * alpha, transitionAlpha, visibility, ukuran, dan teks. Dipanggil
+     * sesaat sesudah view dipindah + sesudah jaring pengaman 600ms.
+     */
+    private fun logNamePillState(avatarView: ImageView?, titleViews: List<TextView>, when_: String) {
+        try {
+            val av = avatarView
+            if (av != null) {
+                logDebug(
+                    "GlassChatHeader: pil nama [$when_] avatar alpha=${av.alpha} " +
+                            "tAlpha=${av.transitionAlpha} vis=${av.visibility} " +
+                            "size=${av.width}x${av.height} drawable=${av.drawable != null}"
+                )
+            }
+            for (tv in titleViews) {
+                logDebug(
+                    "GlassChatHeader: pil nama [$when_] teks alpha=${tv.alpha} " +
+                            "tAlpha=${tv.transitionAlpha} vis=${tv.visibility} " +
+                            "size=${tv.width}x${tv.height} text='${tv.text}'"
+                )
+            }
+        } catch (e: Throwable) {
+            log(e)
+        }
+    }
+
     private fun reviveView(view: View) {
         try {
             view.clearAnimation()
             view.alpha = 1f
+            // Transisi WA memakai transitionAlpha (BEDA dari alpha):
+            // alpha render = alpha * transitionAlpha. Kalau animator
+            // transisi dibatalkan saat removeView, transitionAlpha bisa
+            // mentok 0 dan view tetap tak terlihat walau alpha sudah 1.
+            view.transitionAlpha = 1f
             view.visibility = View.VISIBLE
             view.translationX = 0f
             view.translationY = 0f
@@ -633,6 +683,7 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
             }
             row.addView(textCol)
         }
+        logNamePillState(avatarView, titleViews, "sesudah pindah")
         // Jaring pengaman: kalau animasi WA yang datang terlambat
         // menyembunyikan lagi view yang sudah dipindah, paksa tampil.
         val movedNameViews = ArrayList<View>()
@@ -640,8 +691,9 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
         movedNameViews.addAll(titleViews)
         pill.postDelayed(Runnable {
             for (v in movedNameViews) {
-                if (v.alpha < 0.99f || v.visibility != View.VISIBLE) reviveView(v)
+                if (v.alpha < 0.99f || v.transitionAlpha < 0.99f || v.visibility != View.VISIBLE) reviveView(v)
             }
+            logNamePillState(avatarView, titleViews, "sesudah 600ms")
         }, 600)
         pill.addView(row)
         return pill

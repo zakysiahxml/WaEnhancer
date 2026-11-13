@@ -13,6 +13,7 @@ import android.graphics.Shader
 import android.graphics.drawable.BitmapDrawable
 import android.os.Build
 import android.os.SystemClock
+import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import androidx.recyclerview.widget.RecyclerView
@@ -47,6 +48,7 @@ object GlassBarBlur {
     private const val OVERLAY_COLOR = 0x332E3B42.toInt()
     // Jeda minimum antar update saat scroll (ms).
     private const val UPDATE_THROTTLE_MS = 120L
+    private const val TAG = "GlassBarBlur"
 
     private var lastUpdateMs = 0L
     private var scrollListenerAttachedTo: RecyclerView? = null
@@ -68,13 +70,29 @@ object GlassBarBlur {
      * background blur berhasil dipasang, false kalau harus fallback.
      */
     fun applyBlur(bar: ViewGroup, radiusDp: Float): Boolean {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return false
-        val activity = bar.context.findActivity() ?: return false
-        val root = activity.window?.decorView as? ViewGroup ?: return false
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) {
+            Log.d(TAG, "applyBlur gagal: API < 31")
+            return false
+        }
+        val activity = bar.context.findActivity()
+        if (activity == null) {
+            Log.d(TAG, "applyBlur gagal: activity tidak ketemu")
+            return false
+        }
+        val root = activity.window?.decorView as? ViewGroup
+        if (root == null) {
+            Log.d(TAG, "applyBlur gagal: decorView tidak ketemu")
+            return false
+        }
         currentRadiusDp = radiusDp
-        val blurred = captureAndBlur(bar, root, radiusDp) ?: return false
+        val blurred = captureAndBlur(bar, root, radiusDp)
+        if (blurred == null) {
+            Log.d(TAG, "applyBlur gagal: captureAndBlur null (bar ${bar.width}x${bar.height})")
+            return false
+        }
         bar.background = BitmapDrawable(bar.resources, blurred)
         attachScrollUpdater(bar, activity)
+        Log.d(TAG, "applyBlur OK: blur ${blurred.width}x${blurred.height} dipasang")
         return true
     }
 
@@ -180,6 +198,7 @@ object GlassBarBlur {
             val recycler = findRecyclerView(root) ?: return
             if (scrollListenerAttachedTo === recycler) return
             scrollListenerAttachedTo = recycler
+            Log.d(TAG, "scroll updater: list ${recycler.width}x${recycler.height} anak=${recycler.childCount}")
             // Radius sudut bar dibaca dari background yang sedang dipakai
             // (disimpan ulang tiap refresh lewat tag).
             recycler.addOnScrollListener(object : RecyclerView.OnScrollListener() {
@@ -192,16 +211,34 @@ object GlassBarBlur {
         }
     }
 
+    /**
+     * Cari RecyclerView TERBAIK (bukan pertama ketemu): harus VISIBLE +
+     * sudah ter-layout + punya anak; pemenang = area terbesar (list
+     * utama selalu yang terbesar). Dipakai untuk scroll listener yang
+     * me-refresh blur — salah pilih = blur tidak ikut scroll.
+     */
     private fun findRecyclerView(root: ViewGroup): RecyclerView? {
         val queue = ArrayDeque<View>()
         queue.add(root)
+        var best: RecyclerView? = null
+        var bestArea = 0
         while (queue.isNotEmpty()) {
             val view = queue.removeFirst()
-            if (view is RecyclerView) return view
+            if (view is RecyclerView) {
+                if (view.visibility == View.VISIBLE && view.width > 0 &&
+                    view.height > 0 && view.childCount > 0
+                ) {
+                    val area = view.width * view.height
+                    if (area > bestArea) {
+                        bestArea = area
+                        best = view
+                    }
+                }
+            }
             if (view is ViewGroup) {
                 for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
             }
         }
-        return null
+        return best
     }
 }

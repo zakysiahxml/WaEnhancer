@@ -301,6 +301,25 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
      */
     private fun tryInstallLiquidGlass(bar: ViewGroup, attempt: Int) {
         if (bar.getChildAt(0) is LiquidGlassView) return
+        // Bar belum ter-layout: tunggu (GlassBarBlur butuh ukuran bar).
+        if (bar.width <= 0 || bar.height <= 0) {
+            if (attempt < 10) {
+                bar.postDelayed({ tryInstallLiquidGlass(bar, attempt + 1) }, 300L)
+            }
+            return
+        }
+        // Jalur UTAMA: GlassBarBlur (tangkap decor view — isinya PASTI
+        // ada karena itu seluruh layar di belakang bar). Jalur library
+        // (backdrop RecyclerView) terbukti merender transparan polos
+        // di HP ini (v9c/v9d), jadi jangan jadikan andalan lagi.
+        val blurRadiusDp = xprefs.getInt(
+            "floating_bottom_bar_radius", CORNER_RADIUS_DP.toInt()
+        ).toFloat()
+        if (GlassBarBlur.applyBlur(bar, blurRadiusDp)) {
+            logDebug("FloatingBottomBar: GlassBarBlur aktif (blur decor view)")
+            return
+        }
+        logDebug("FloatingBottomBar: GlassBarBlur gagal, coba jalur library")
         val backdrop = findRecyclerView(bar.rootView)
         if (backdrop == null) {
             if (attempt < 10) {
@@ -344,8 +363,10 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
                 // Backdrop = RecyclerView chat di belakang bar.
                 backdropSource = backdrop
             }
-            // Bar jadi transparan, kacanya yang ngegambar.
-            bar.background = null
+            // Background GradientDrawable JANGAN dihapus: kalau kaca
+            // library merender transparan (terbukti di v9c/v9d), bar
+            // tetap kelihatan sebagai pil tembus, bukan hilang total.
+            // Kaca digambar DI ATAS background sebagai anak pertama.
             bar.addView(glass, 0)
             logDebug(
                 "FloatingBottomBar: kaca terpasang, backdrop=" +
