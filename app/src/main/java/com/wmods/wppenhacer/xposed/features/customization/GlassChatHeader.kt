@@ -83,7 +83,15 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
         private const val V1_ELEVATION_DP = 4f
         private const val V1_BACKGROUND_ALPHA = 0.85f
         private const val V1_STROKE_ALPHA = 0.40f
+        private const val HEADER_STYLE_DELAY_MS = 750L
     }
+
+    private data class OriginalPlacement(
+        val view: View,
+        val parent: ViewGroup,
+        val index: Int,
+        val layoutParams: ViewGroup.LayoutParams?
+    )
 
     private val styledToolbars = WeakHashMap<ViewGroup, Boolean>()
     private val styleAttempts = WeakHashMap<ViewGroup, Int>()
@@ -109,7 +117,7 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
         }.hook {
             after {
                 val activity = instance as? Activity ?: return@after
-                activity.window?.decorView?.post { styleHeader(activity) }
+                scheduleHeaderStyle(activity)
             }
         }
 
@@ -119,13 +127,19 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
         }.hook {
             after {
                 val activity = instance as? Activity ?: return@after
-                activity.window?.decorView?.post { styleHeader(activity) }
+                scheduleHeaderStyle(activity)
             }
         }
     }
 
     override fun getPluginName(): String {
         return "Glass Chat Header"
+    }
+
+    private fun scheduleHeaderStyle(activity: Activity) {
+        activity.window?.decorView?.postDelayed({
+            if (!activity.isFinishing) styleHeader(activity)
+        }, HEADER_STYLE_DELAY_MS)
     }
 
     private fun styleHeader(activity: Activity) {
@@ -164,6 +178,8 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
     // ------------------------------------------------------------------
 
     private fun tryRestructureToPills(activity: Activity, toolbar: ViewGroup): Boolean {
+        var originalChildren = emptyList<View>()
+        var originalPlacements = emptyList<OriginalPlacement>()
         return try {
             // Toolbar jadi wadah transparan (latar + elevation dimatikan).
             toolbar.setBackgroundColor(Color.TRANSPARENT)
@@ -184,12 +200,25 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
             // Kumpulkan anak-anak toolbar sebelum dipindah.
             val children = ArrayList<View>()
             for (i in 0 until toolbar.childCount) children.add(toolbar.getChildAt(i))
+            originalChildren = children
             if (children.isEmpty()) return false
 
             val navButton = findNavButton(toolbar)
             val avatarView = findAvatarView(toolbar)
             val titleViews = findTitleViews(toolbar)
             val actionMenu = findActionMenu(toolbar)
+            val movedViews = ArrayList<View>()
+            navButton?.let(movedViews::add)
+            avatarView?.let(movedViews::add)
+            movedViews.addAll(titleViews)
+            if (actionMenu != null) {
+                for (i in 0 until actionMenu.childCount) movedViews.add(actionMenu.getChildAt(i))
+            }
+            originalPlacements = movedViews.distinct().mapNotNull { movedView ->
+                val parent = movedView.parent as? ViewGroup ?: return@mapNotNull null
+                val index = parent.indexOfChild(movedView)
+                if (index < 0) null else OriginalPlacement(movedView, parent, index, movedView.layoutParams)
+            }
             logDebug("GlassChatHeader: anak=${children.size} nav=${navButton != null} avatar=${avatarView != null} judul=${titleViews.size} menu=${actionMenu != null}")
             // Minimal harus ada tombol back + judul. Kalau tidak ada, v1 saja.
             if (navButton == null && titleViews.isEmpty()) {
@@ -226,6 +255,7 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
             val pills = listOfNotNull(backPill, namePill, actionPill)
             if (pills.size < 2) {
                 logDebug("GlassChatHeader: hanya ${pills.size} pil berhasil, pakai v1")
+                restoreOriginalToolbar(toolbar, originalChildren, originalPlacements)
                 return false
             }
 
@@ -274,7 +304,44 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
             true
         } catch (e: Throwable) {
             log(e)
+            if (originalChildren.isNotEmpty()) {
+                restoreOriginalToolbar(toolbar, originalChildren, originalPlacements)
+            }
             false
+        }
+    }
+
+    private fun restoreOriginalToolbar(
+        toolbar: ViewGroup,
+        originalChildren: List<View>,
+        placements: List<OriginalPlacement>
+    ) {
+        try {
+            for (placement in placements) {
+                val currentParent = placement.view.parent as? ViewGroup
+                if (currentParent !== placement.parent) currentParent?.removeView(placement.view)
+            }
+            for (child in originalChildren) {
+                val currentParent = child.parent as? ViewGroup
+                if (currentParent !== toolbar) currentParent?.removeView(child)
+            }
+            toolbar.removeAllViews()
+            for ((index, child) in originalChildren.withIndex()) {
+                val placement = placements.firstOrNull { it.view === child && it.parent === toolbar }
+                toolbar.addView(child, index, placement?.layoutParams ?: child.layoutParams)
+            }
+            for ((parent, entries) in placements.filter { it.parent !== toolbar }.groupBy { it.parent }) {
+                for (placement in entries.sortedBy { it.index }) {
+                    val currentParent = placement.view.parent as? ViewGroup
+                    if (currentParent !== parent) currentParent?.removeView(placement.view)
+                    if (placement.view.parent !== parent) {
+                        val index = placement.index.coerceIn(0, parent.childCount)
+                        parent.addView(placement.view, index, placement.layoutParams ?: placement.view.layoutParams)
+                    }
+                }
+            }
+        } catch (e: Throwable) {
+            log(e)
         }
     }
 
@@ -590,6 +657,7 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
 
     private fun reviveView(view: View) {
         try {
+            view.animate().cancel()
             view.clearAnimation()
             view.alpha = 1f
             // Transisi WA memakai transitionAlpha (BEDA dari alpha):
@@ -640,10 +708,6 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
         }
         if (navButton != null) {
             (navButton.parent as? ViewGroup)?.removeView(navButton)
-            reviveView(navButton)
-            navButton.setBackgroundColor(Color.TRANSPARENT)
-            val navSize = Utils.dipToPixels(24f)
-            navButton.layoutParams = LinearLayout.LayoutParams(navSize, navSize)
             row.addView(navButton)
         }
         // Angka unread ("40" di referensi). Best-effort: kalau tidak

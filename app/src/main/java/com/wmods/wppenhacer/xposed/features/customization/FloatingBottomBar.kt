@@ -21,6 +21,7 @@ import com.example.liquidglass.LiquidGlassView
 import com.wmods.wppenhacer.xposed.core.Feature
 import com.wmods.wppenhacer.xposed.core.ViewHookDispatcher
 import com.wmods.wppenhacer.xposed.utils.Utils
+import java.lang.ref.WeakReference
 import java.util.WeakHashMap
 
 class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
@@ -56,6 +57,7 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
 
     private val processedBars = WeakHashMap<ViewGroup, Boolean>()
     private val setupAttempts = WeakHashMap<ViewGroup, Int>()
+    private val overlayByRoot = WeakHashMap<FrameLayout, WeakReference<ViewGroup>>()
     private val baseBottomPadding = WeakHashMap<ViewGroup, Int>()
     private val paddingGuarded = WeakHashMap<ViewGroup, Boolean>()
     private val pillInstalled = WeakHashMap<ViewGroup, Boolean>()
@@ -92,6 +94,15 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
             val bar = view as? ViewGroup ?: return@onDetachedFromWindow
             setupAttempts.remove(bar)
             processedBars.remove(bar)
+            val container = bar.parent as? ViewGroup ?: return@onDetachedFromWindow
+            val root = container.parent as? FrameLayout ?: return@onDetachedFromWindow
+            if (overlayByRoot[root]?.get() !== container) return@onDetachedFromWindow
+            root.post {
+                if (!bar.isAttachedToWindow && overlayByRoot[root]?.get() === container) {
+                    if (container.parent === root) root.removeView(container)
+                    overlayByRoot.remove(root)
+                }
+            }
         }
     }
 
@@ -137,7 +148,9 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
         try {
             val container = bar.parent as? ViewGroup ?: return false
             val rootView = findRootView(bar) ?: return false
+            removePreviousOverlay(rootView, container)
             if (container.parent === rootView) {
+                overlayByRoot[rootView] = WeakReference(container)
                 updateOverlayLayout(rootView, container, bar)
                 applyTransparentShadowStyle(container, bar)
                 installActivePill(bar)
@@ -155,6 +168,7 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
                 bottomMargin = navigationBarInset(rootView) + Utils.dipToPixels(BOTTOM_MARGIN_DP)
             }
             rootView.addView(container, rootParams)
+            overlayByRoot[rootView] = WeakReference(container)
 
             applyTransparentShadowStyle(container, bar)
             installActivePill(bar)
@@ -166,6 +180,16 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
             log(e)
             return false
         }
+    }
+
+    private fun removePreviousOverlay(rootView: FrameLayout, currentContainer: ViewGroup) {
+        val previous = overlayByRoot[rootView]?.get() ?: return
+        if (previous === currentContainer) return
+        if (previous.parent === rootView) {
+            rootView.removeView(previous)
+            logDebug("FloatingBottomBar: stale overlay dilepas sebelum bar baru dipasang")
+        }
+        overlayByRoot.remove(rootView)
     }
 
     private fun updateOverlayLayout(rootView: FrameLayout, container: ViewGroup, bar: ViewGroup) {

@@ -1,7 +1,6 @@
 package com.wmods.wppenhacer.xposed.features.customization
 
 import android.content.SharedPreferences
-import android.graphics.drawable.BitmapDrawable
 import android.graphics.drawable.Drawable
 import android.view.MenuItem
 import com.highcapable.kavaref.KavaRef.Companion.resolve
@@ -122,40 +121,40 @@ class IosTabBar(loader: ClassLoader, preferences: SharedPreferences) :
 
         for (candidate in candidates) {
             if (!candidate.isAssignableFrom(menuItem.javaClass)) continue
-            try {
-                val method = ReflectionUtils.findMethodExact(
-                    candidate,
-                    "setIcon",
-                    Drawable::class.java
-                )
-                val shouldHook = synchronized(hookedSetIconMethodsLock) {
-                    hookedSetIconMethods.add(method)
-                }
-                if (!shouldHook) continue
+            val iconSignatures = listOf(
+                arrayOf<Class<*>>(Drawable::class.java),
+                arrayOf<Class<*>>(Int::class.javaPrimitiveType!!)
+            )
+            for (signature in iconSignatures) {
+                try {
+                    val method = ReflectionUtils.findMethodExact(candidate, "setIcon", *signature)
+                    val shouldHook = synchronized(hookedSetIconMethodsLock) {
+                        hookedSetIconMethods.add(method)
+                    }
+                    if (!shouldHook) continue
 
-                method.hook {
-                    after {
-                        if (enforcingIcon.get()) return@after
-                        val target = instance as? MenuItem ?: return@after
-                        val expected = trackedDrawableFor(target) ?: return@after
-                        val requested = args.firstOrNull() as? Drawable
-                        // Do not replace profile/avatar bitmaps, and do not
-                        // re-enter for the exact selector drawable we set.
-                        if (requested is BitmapDrawable || requested === expected) return@after
+                    method.hook {
+                        after {
+                            if (enforcingIcon.get()) return@after
+                            val target = instance as? MenuItem ?: return@after
+                            val expected = trackedDrawableFor(target) ?: return@after
+                            val requested = args.firstOrNull()
+                            if (requested === expected) return@after
 
-                        enforcingIcon.set(true)
-                        try {
-                            target.setIcon(expected)
-                        } catch (e: Throwable) {
-                            log(e)
-                        } finally {
-                            enforcingIcon.remove()
+                            enforcingIcon.set(true)
+                            try {
+                                target.setIcon(expected)
+                            } catch (e: Throwable) {
+                                log(e)
+                            } finally {
+                                enforcingIcon.remove()
+                            }
                         }
                     }
+                    logDebug("IosTabBar: hook setIcon terpasang pada ${candidate.name}")
+                } catch (e: Throwable) {
+                    log(e)
                 }
-                logDebug("IosTabBar: hook setIcon terpasang pada ${candidate.name}")
-            } catch (e: Throwable) {
-                log(e)
             }
         }
     }
