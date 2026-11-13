@@ -221,8 +221,8 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
             }
             logDebug("GlassChatHeader: anak=${children.size} nav=${navButton != null} avatar=${avatarView != null} judul=${titleViews.size} menu=${actionMenu != null}")
             // Minimal harus ada tombol back + judul. Kalau tidak ada, v1 saja.
-            if (navButton == null && titleViews.isEmpty()) {
-                logDebug("GlassChatHeader: back + judul tidak ketemu, pakai v1")
+            if (navButton == null || titleViews.isEmpty()) {
+                logDebug("GlassChatHeader: back atau judul tidak ketemu, pakai v1")
                 return false
             }
 
@@ -253,8 +253,8 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
                 log(e)
             }
             val pills = listOfNotNull(backPill, namePill, actionPill)
-            if (pills.size < 2) {
-                logDebug("GlassChatHeader: hanya ${pills.size} pil berhasil, pakai v1")
+            if (backPill == null || namePill == null || pills.size < 2) {
+                logDebug("GlassChatHeader: pil back/nama tidak lengkap, rollback dan pakai v1")
                 restoreOriginalToolbar(toolbar, originalChildren, originalPlacements)
                 return false
             }

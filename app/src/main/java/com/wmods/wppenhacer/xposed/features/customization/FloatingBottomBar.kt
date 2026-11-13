@@ -148,8 +148,8 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
         try {
             val container = bar.parent as? ViewGroup ?: return false
             val rootView = findRootView(bar) ?: return false
-            removePreviousOverlay(rootView, container)
             if (container.parent === rootView) {
+                removePreviousOverlay(rootView, container)
                 overlayByRoot[rootView] = WeakReference(container)
                 updateOverlayLayout(rootView, container, bar)
                 applyTransparentShadowStyle(container, bar)
@@ -168,6 +168,7 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
                 bottomMargin = navigationBarInset(rootView) + Utils.dipToPixels(BOTTOM_MARGIN_DP)
             }
             rootView.addView(container, rootParams)
+            removePreviousOverlay(rootView, container)
             overlayByRoot[rootView] = WeakReference(container)
 
             applyTransparentShadowStyle(container, bar)
@@ -183,13 +184,24 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
     }
 
     private fun removePreviousOverlay(rootView: FrameLayout, currentContainer: ViewGroup) {
-        val previous = overlayByRoot[rootView]?.get() ?: return
-        if (previous === currentContainer) return
-        if (previous.parent === rootView) {
-            rootView.removeView(previous)
-            logDebug("FloatingBottomBar: stale overlay dilepas sebelum bar baru dipasang")
+        val previous = overlayByRoot[rootView]?.get()
+        if (previous !== currentContainer) {
+            if (previous?.parent === rootView) {
+                rootView.removeView(previous)
+                logDebug("FloatingBottomBar: stale overlay dilepas sebelum bar baru dipasang")
+            }
+            overlayByRoot.remove(rootView)
         }
-        overlayByRoot.remove(rootView)
+
+        val bottomNavId = Utils.getID("bottom_nav", "id")
+        if (bottomNavId <= 0) return
+        for (index in rootView.childCount - 1 downTo 0) {
+            val candidate = rootView.getChildAt(index)
+            if (candidate === currentContainer) continue
+            if (candidate.id != bottomNavId && candidate.findViewById<View>(bottomNavId) == null) continue
+            rootView.removeViewAt(index)
+            logDebug("FloatingBottomBar: duplikat navbar tak terlacak dilepas dari root")
+        }
     }
 
     private fun updateOverlayLayout(rootView: FrameLayout, container: ViewGroup, bar: ViewGroup) {
