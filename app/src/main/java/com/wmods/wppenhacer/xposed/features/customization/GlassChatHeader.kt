@@ -3,6 +3,7 @@ package com.wmods.wppenhacer.xposed.features.customization
 import android.app.Activity
 import android.content.SharedPreferences
 import android.graphics.Color
+import android.graphics.Rect
 import android.graphics.drawable.Drawable
 import android.graphics.Outline
 import android.graphics.drawable.GradientDrawable
@@ -41,7 +42,7 @@ import java.util.WeakHashMap
  *   MIT — refraksi SDF + dispersi + specular; bukan blur bitmap),
  *   warna blur abu-abu gelap kebiruan (tint #2E3B42 alpha 0.40),
  *   sudut membulat, tanpa outline putih yang keras; kalau library gagal
- *   (class/native tidak ke-load), fallback ke GlassBarBlur;
+ *   (class/native tidak ke-load), fallback ke pil bertint;
  * - avatar dikasih RING HIJAU (WhatsApp green #25D366);
  * - pil back berisi panah back + angka unread ("40" di referensi).
  *
@@ -75,8 +76,6 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
         // Ring hijau avatar.
         private const val AVATAR_RING_WIDTH_DP = 3f
         private const val AVATAR_RING_COLOR = 0xFF25D366.toInt()
-        // Warna fallback kalau blur gagal (semi-transparan, bukan hitam polos).
-        private const val FALLBACK_BG_COLOR = 0xB31E2A32.toInt()
         // v1 (fallback): konstanta lama.
         private const val V1_CORNER_RADIUS_DP = 28f
         private const val V1_SIDE_MARGIN_DP = 12f
@@ -270,15 +269,8 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
             }
             toolbar.addView(container)
 
-            // Pil yang BUKAN LiquidGlassView (fallback) dikasih blur
-            // bitmap sendiri; pil Liquid Glass sudah ngegambar sendiri.
-            for (pill in pills) {
-                if (pill is LiquidGlassView) continue
-                pill.post {
-                    val ok = GlassBarBlur.applyBlur(pill, PILL_RADIUS_DP)
-                    if (!ok) pill.background = buildFallbackPillBg()
-                }
-            }
+            toolbar.postDelayed({ logToolbarChildren(toolbar, "sesudah 600ms") }, 600L)
+            toolbar.postDelayed({ logToolbarChildren(toolbar, "sesudah 1800ms") }, 1800L)
             true
         } catch (e: Throwable) {
             log(e)
@@ -406,7 +398,7 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
      * Bikin wadah pil kaca. Utamanya LiquidGlassView (library QWEA0,
      * refraksi + dispersi + specular beneran); kalau gagal (class tidak
      * ada / native lib gagal), fallback ke FrameLayout polos (nanti
-     * dikasih GlassBarBlur oleh pemanggil).
+     * memakai background bertint).
      */
     private fun makeGlassPill(
         activity: Activity,
@@ -504,33 +496,96 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
      * kosong, pil back + aksi normal karena tidak ikut animasi itu).
      * Setiap view yang dipindah harus dilewatkan sini.
      */
-    /**
-     * Catat keadaan view pil nama (buat diagnosa kalau pil tetap kosong):
-     * alpha, transitionAlpha, visibility, ukuran, dan teks. Dipanggil
-     * sesaat sesudah view dipindah + sesudah jaring pengaman 600ms.
-     */
     private fun logNamePillState(avatarView: ImageView?, titleViews: List<TextView>, when_: String) {
         try {
             val av = avatarView
             if (av != null) {
+                val visibleBounds = Rect()
+                val globallyVisible = av.getGlobalVisibleRect(visibleBounds)
+                val screenLocation = IntArray(2)
+                av.getLocationOnScreen(screenLocation)
                 logDebug(
                     "GlassChatHeader: pil nama [$when_] avatar alpha=${av.alpha} " +
                             "tAlpha=${av.transitionAlpha} vis=${av.visibility} " +
                             "shown=${av.isShown} layer=${av.layerType} " +
-                            "size=${av.width}x${av.height} drawable=${av.drawable != null}"
+                            "size=${av.width}x${av.height} screen=${screenLocation[0]},${screenLocation[1]} " +
+                            "globalVisible=$globallyVisible:$visibleBounds drawable=${av.drawable != null} " +
+                            "drawableAlpha=${av.drawable?.alpha} ancestors=${describeParentChain(av)}"
                 )
             }
             for (tv in titleViews) {
+                val visibleBounds = Rect()
+                val globallyVisible = tv.getGlobalVisibleRect(visibleBounds)
+                val screenLocation = IntArray(2)
+                tv.getLocationOnScreen(screenLocation)
                 logDebug(
                     "GlassChatHeader: pil nama [$when_] teks alpha=${tv.alpha} " +
                             "tAlpha=${tv.transitionAlpha} vis=${tv.visibility} " +
                             "shown=${tv.isShown} layer=${tv.layerType} " +
-                            "size=${tv.width}x${tv.height} text='${tv.text}'"
+                            "size=${tv.width}x${tv.height} screen=${screenLocation[0]},${screenLocation[1]} " +
+                            "globalVisible=$globallyVisible:$visibleBounds textColor=${tv.currentTextColor} " +
+                            "textColorAlpha=${Color.alpha(tv.currentTextColor)} paintAlpha=${tv.paint.alpha} " +
+                            "text='${tv.text}' ancestors=${describeParentChain(tv)}"
                 )
             }
         } catch (e: Throwable) {
             log(e)
         }
+    }
+
+    private fun describeParentChain(view: View): String {
+        val chain = ArrayList<String>()
+        var ancestor = view.parent as? View
+        var depth = 0
+        while (ancestor != null && depth < 8) {
+            val parent = ancestor.parent as? ViewGroup
+            val group = ancestor as? ViewGroup
+            val visibleBounds = Rect()
+            val globallyVisible = ancestor.getGlobalVisibleRect(visibleBounds)
+            chain.add(
+                "${ancestor.javaClass.simpleName}[${parent?.indexOfChild(ancestor) ?: -1}/" +
+                        "${parent?.childCount ?: 0}] vis=${ancestor.visibility} alpha=${ancestor.alpha} " +
+                        "shown=${ancestor.isShown} clip=${group?.clipChildren}/${group?.clipToPadding} " +
+                        "globalVisible=$globallyVisible:$visibleBounds"
+            )
+            ancestor = ancestor.parent as? View
+            depth++
+        }
+        return chain.joinToString(" <- ")
+    }
+
+    private fun logToolbarChildren(toolbar: ViewGroup, when_: String) {
+        try {
+            for (i in 0 until toolbar.childCount) {
+                val child = toolbar.getChildAt(i)
+                logToolbarChild(child, "toolbar[$i/${toolbar.childCount}]", when_)
+                val group = child as? ViewGroup ?: continue
+                for (j in 0 until group.childCount) {
+                    logToolbarChild(
+                        group.getChildAt(j),
+                        "toolbar[$i].child[$j/${group.childCount}]",
+                        when_
+                    )
+                }
+            }
+        } catch (e: Throwable) {
+            log(e)
+        }
+    }
+
+    private fun logToolbarChild(view: View, path: String, when_: String) {
+        val visibleBounds = Rect()
+        val globallyVisible = view.getGlobalVisibleRect(visibleBounds)
+        val screenLocation = IntArray(2)
+        view.getLocationOnScreen(screenLocation)
+        val group = view as? ViewGroup
+        logDebug(
+            "GlassChatHeader: hierarchy [$when_] $path ${view.javaClass.simpleName} id=${view.id} " +
+                    "vis=${view.visibility} alpha=${view.alpha} shown=${view.isShown} " +
+                    "size=${view.width}x${view.height} screen=${screenLocation[0]},${screenLocation[1]} " +
+                    "globalVisible=$globallyVisible:$visibleBounds z=${view.z} elevation=${view.elevation} " +
+                    "clip=${group?.clipChildren}/${group?.clipToPadding}"
+        )
     }
 
     private fun reviveView(view: View) {
@@ -706,6 +761,7 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
             }
             logNamePillState(avatarView, titleViews, "sesudah 600ms")
         }, 600)
+        pill.postDelayed({ logNamePillState(avatarView, titleViews, "sesudah 1800ms") }, 1800L)
         pill.addView(row)
         return pill
     }
@@ -807,19 +863,6 @@ class GlassChatHeader(loader: ClassLoader, preferences: SharedPreferences) :
                 }
             }
         } catch (_: Throwable) {
-        }
-    }
-
-    /** Background fallback pil (kalau blur gagal): warna semi-transparan. */
-    private fun buildFallbackPillBg(): GradientDrawable {
-        val radius = Utils.dipToPixels(PILL_RADIUS_DP).toFloat()
-        return GradientDrawable().apply {
-            shape = GradientDrawable.RECTANGLE
-            cornerRadii = floatArrayOf(
-                radius, radius, radius, radius,
-                radius, radius, radius, radius
-            )
-            setColor(FALLBACK_BG_COLOR)
         }
     }
 

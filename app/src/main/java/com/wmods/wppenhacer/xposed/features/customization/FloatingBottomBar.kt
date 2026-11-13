@@ -16,7 +16,6 @@ import android.widget.Checkable
 import android.widget.FrameLayout
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
-import androidx.recyclerview.widget.RecyclerView
 import com.example.liquidglass.GlassMaterial
 import com.example.liquidglass.LiquidGlassView
 import com.wmods.wppenhacer.xposed.core.Feature
@@ -276,12 +275,8 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
         stripBottomInset(bar)
         installPaddingGuard(bar)
 
-        // Bar Kaca iOS: kaca beneran pakai library Liquid Glass
-        // (QWEA0/Liquid-Glass-Android, MIT) — LiquidGlassView ditambah
-        // sebagai anak pertama bar (di belakang tab), backdrop-nya
-        // RecyclerView chat di belakang bar. Kalau gagal (class tidak ada
-        // / native lib gagal / bar bukan FrameLayout), fallback ke
-        // GlassBarBlur (blur bitmap sendiri).
+        // Use the Activity content tree as the backdrop. It includes the
+        // visible screen content without assuming the list is a RecyclerView.
         if (isGlass()) {
             bar.post { tryInstallLiquidGlass(bar, 0) }
         }
@@ -289,57 +284,28 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
         bar.post { applyIconSpacing(bar) }
     }
 
-    /**
-     * Pasang LiquidGlassView di bar bawah, dengan backdrop (RecyclerView
-     * chat) yang dicari berulang. Saat bar pertama di-style, RecyclerView
-     * kadang belum nempel di tree — kalau kaca dipasang tanpa backdrop,
-     * library jatuh ke parent (bar itu sendiri) dan yang ke-blur malah
-     * isi bar (pil biru + badge): itu sumber coreng biru aneh di kaca.
-     * Kalau sesudah 10x coba backdrop tetap tidak ketemu, fallback ke
-     * GlassBarBlur (menyembunyikan bar saat capture, jadi tidak ada
-     * coreng biru).
-     */
     private fun tryInstallLiquidGlass(bar: ViewGroup, attempt: Int) {
         if (bar.getChildAt(0) is LiquidGlassView) return
-        // Bar belum ter-layout: tunggu (GlassBarBlur butuh ukuran bar).
         if (bar.width <= 0 || bar.height <= 0) {
             if (attempt < 10) {
                 bar.postDelayed({ tryInstallLiquidGlass(bar, attempt + 1) }, 300L)
             }
             return
         }
-        // Jalur UTAMA: GlassBarBlur (tangkap decor view — isinya PASTI
-        // ada karena itu seluruh layar di belakang bar). Jalur library
-        // (backdrop RecyclerView) terbukti merender transparan polos
-        // di HP ini (v9c/v9d), jadi jangan jadikan andalan lagi.
-        val blurRadiusDp = xprefs.getInt(
-            "floating_bottom_bar_radius", CORNER_RADIUS_DP.toInt()
-        ).toFloat()
-        if (GlassBarBlur.applyBlur(bar, blurRadiusDp)) {
-            logDebug("FloatingBottomBar: GlassBarBlur aktif (blur decor view)")
-            return
-        }
-        logDebug("FloatingBottomBar: GlassBarBlur gagal, coba jalur library")
-        val backdrop = findRecyclerView(bar.rootView)
+        val backdrop = findContentBackdrop(bar)
         if (backdrop == null) {
             if (attempt < 10) {
                 bar.postDelayed({ tryInstallLiquidGlass(bar, attempt + 1) }, 300L)
             } else {
-                logDebug("FloatingBottomBar: backdrop tidak ketemu setelah 10x, fallback GlassBarBlur")
-                val radiusDp = xprefs.getInt(
-                    "floating_bottom_bar_radius", CORNER_RADIUS_DP.toInt()
-                ).toFloat()
-                bar.post { GlassBarBlur.applyBlur(bar, radiusDp) }
+                logDebug("FloatingBottomBar: android.R.id.content backdrop tidak tersedia")
             }
             return
         }
-        installLiquidGlass(bar, backdrop)
+        if (!installLiquidGlass(bar, backdrop)) {
+            logDebug("FloatingBottomBar: LiquidGlassView tidak terpasang; mempertahankan background bar")
+        }
     }
 
-    /**
-     * Pasang LiquidGlassView dengan [backdrop] yang sudah ketemu.
-     * Mengembalikan true kalau kaca terpasang, false kalau fallback.
-     */
     private fun installLiquidGlass(bar: ViewGroup, backdrop: View): Boolean {
         val radiusDp = xprefs.getInt(
             "floating_bottom_bar_radius", CORNER_RADIUS_DP.toInt()
@@ -360,7 +326,7 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
                 // Kaca harus TEMBUS seperti referensi: tint terang tipis
                 // supaya teks chat di belakang bar tetap kelihatan nge-blur.
                 setGlassTint(0xFF9AA7B2.toInt(), 0.15f)
-                // Backdrop = RecyclerView chat di belakang bar.
+                // Backdrop is the Activity content view, not a specific list class.
                 backdropSource = backdrop
             }
             // Background GradientDrawable JANGAN dihapus: kalau kaca
@@ -369,58 +335,35 @@ class FloatingBottomBar(loader: ClassLoader, preferences: SharedPreferences) :
             // Kaca digambar DI ATAS background sebagai anak pertama.
             bar.addView(glass, 0)
             logDebug(
-                "FloatingBottomBar: kaca terpasang, backdrop=" +
+                "FloatingBottomBar: kaca terpasang, backdrop=android.R.id.content " +
                         "${backdrop.javaClass.simpleName} " +
-                        "${backdrop.width}x${backdrop.height} " +
-                        "anak=${(backdrop as? ViewGroup)?.childCount}"
+                        "${backdrop.width}x${backdrop.height} shown=${backdrop.isShown}"
             )
             return true
         } catch (e: Throwable) {
             log(e)
-            // Fallback: blur bitmap sendiri.
-            bar.post { GlassBarBlur.applyBlur(bar, radiusDp) }
             return false
         }
     }
 
-    /**
-     * Cari RecyclerView TERBAIK sebagai sumber backdrop kaca — BUKAN yang
-     * pertama ketemu. First-match BFS pernah mengambil RecyclerView yang
-     * salah (kosong/tersembunyi) sehingga kaca cuma transparan tanpa blur:
-     * hasil capture-nya bitmap kosong, dan isi chat di belakang bar
-     * kelihatan tajam karena kaca tidak menggambar apa-apa.
-     * Kriteria: harus VISIBLE + sudah ter-layout + punya anak; pemenang =
-     * area terbesar (list chat utama selalu yang terbesar di layar).
-     */
-    private fun findRecyclerView(root: View): RecyclerView? {
-        val queue = ArrayDeque<View>()
-        queue.add(root)
-        var best: RecyclerView? = null
-        var bestArea = 0
-        var found = 0
-        while (queue.isNotEmpty()) {
-            val view = queue.removeFirst()
-            if (view is RecyclerView) {
-                found++
-                val area = view.width * view.height
-                val usable = view.visibility == View.VISIBLE &&
-                        view.width > 0 && view.height > 0 &&
-                        view.childCount > 0
-                if (usable && area > bestArea) {
-                    best = view
-                    bestArea = area
-                }
-            }
-            if (view is ViewGroup) {
-                for (i in 0 until view.childCount) queue.add(view.getChildAt(i))
-            }
+    private fun findContentBackdrop(bar: ViewGroup): View? {
+        val content = bar.rootView.findViewById<View>(android.R.id.content) ?: return null
+        if (content === bar || isDescendantOf(content, bar)) return null
+        if (content.visibility != View.VISIBLE || !content.isShown ||
+            content.width <= 0 || content.height <= 0
+        ) {
+            return null
         }
-        logDebug(
-            "FloatingBottomBar: backdrop scan: $found RecyclerView, " +
-                    "pilih=${best?.javaClass?.simpleName} " +
-                    "${best?.width}x${best?.height} anak=${best?.childCount}"
-        )
-        return best
+        return content
+    }
+
+    private fun isDescendantOf(view: View, ancestor: View): Boolean {
+        var current = view.parent
+        while (current is View) {
+            if (current === ancestor) return true
+            current = current.parent
+        }
+        return false
     }
 
     /**
