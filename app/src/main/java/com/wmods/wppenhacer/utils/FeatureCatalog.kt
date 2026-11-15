@@ -457,6 +457,11 @@ object FeatureCatalog {
             "alert"
         )
         add(
+            catalog, context, "restore_stickers", R.string.restore_stickers,
+            R.string.restore_stickers_sum, SearchableFeature.Category.GENERAL_CONVERSATION,
+            general, "conversation", "sticker", "restore", "favorites", "root"
+        )
+        add(
             catalog, context, "calltype", R.string.selection_of_call_type,
             R.string.selection_of_call_type_sum, SearchableFeature.Category.GENERAL_CONVERSATION,
             general, "conversation", "call", "type", "selection", "phone"
@@ -1033,6 +1038,11 @@ object FeatureCatalog {
         add(
             catalog, context, "menuwicon", R.string.menuwicon, R.string.menuwicon_sum,
             category, fragment, null, "menu", "icons"
+        )
+        add(
+            catalog, context, "native_floating_navigation", R.string.native_floating_navigation,
+            R.string.native_floating_navigation_sum, category, fragment, null,
+            "navigation", "bottom", "bar", "floating", "native"
         )
         add(
             catalog, context, "novaconfig", R.string.novaconfig, R.string.novaconfig_sum,

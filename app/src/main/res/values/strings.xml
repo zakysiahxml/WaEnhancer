@@ -606,4 +606,30 @@
     <string name="custom_keybox">Custom KeyBox</string>
     <string name="custom_keybox_file">keybox.xml file</string>
     <string name="custom_keybox_file_none">No file selected</string>
+    <string name="restore_stickers">Restore stickers</string>
+    <string name="restore_stickers_sum">Copy every saved sticker back to Favorites (requires root)</string>
+    <string name="restore_stickers_choose_account">Select account</string>
+    <string name="restore_stickers_main_account">Main account</string>
+    <string name="restore_stickers_account">Account %s</string>
+    <string name="restore_stickers_active">(active)</string>
+    <string name="restore_stickers_user_suffix">(user %d)</string>
+    <string name="restore_stickers_loading">Reading stickers database…</string>
+    <string name="restore_stickers_preview">%1$d stickers will be restored to Favorites.\n\nSaved stickers: %2$d\nAlready in Favorites: %3$d</string>
+    <string name="restore_stickers_warning">⚠️ Every sticker saved on this device will appear as a favorite, including stickers you never added to Favorites. WAE cannot undo this, you will have to remove them manually in WhatsApp.\n\nWhatsApp will be closed.</string>
+    <string name="restore_stickers_confirm">Restore</string>
+    <string name="restore_stickers_nothing">All saved stickers are already in Favorites.</string>
+    <string name="restore_stickers_success">%d stickers restored to Favorites.</string>
+    <string name="restore_stickers_no_root">Root access is required to restore stickers.</string>
+    <string name="restore_stickers_not_found">No WhatsApp sticker database was found.</string>
+    <string name="restore_stickers_failed">Failed to restore stickers: %s</string>
+    <string name="restore_stickers_open_whatsapp">Open WhatsApp</string>
+    <string name="select_whatsapp_app">Select WhatsApp app</string>
+    <string name="native_floating_navigation">Native floating navigation</string>
+    <string name="native_floating_navigation_sum">Turn on WhatsApp\'s own floating bottom bar, which it is still rolling out (Android 11+)</string>
+    <string name="native_floating_navigation_bg_color">Background color</string>
+    <string name="native_floating_navigation_selection_color">Selection color</string>
+    <string name="plugin_loading_title" translatable="false">WaEnhancer</string>
+    <string name="plugin_loading_starting">Preparing features after an update…</string>
+    <string name="plugin_loading_progress">Preparing features… %1$d/%2$d</string>
+    <string name="plugin_loading_channel">Feature loading</string>
 </resources>
