@@ -980,6 +980,58 @@ object Unobfuscator {
 
     @Throws(Exception::class)
     @JvmStatic
+    fun loadStatusContentSetMutedMethod(loader: ClassLoader): Method {
+        return UnobfuscatorCache.getInstance().getMethod(loader) {
+            // Status content (X.C77W) has a single void(boolean) method, A0d, that
+            // stores the muted flag, pushes it to the video player volume and runs
+            // the audio-focus handshake. Forcing its argument to false makes every
+            // status play with sound. It is resolved at runtime from string anchors,
+            // never by hard-coded obfuscated names.
+            // Primary anchor: the "video player is null for " throw inside the video
+            // content's start method (X.C77g.A0H). Walk its invokes and pick the
+            // void(boolean) method declared on its superclass (X.C77W.A0d).
+            val anchors = bridge.findMethod {
+                matcher {
+                    addUsingString("video player is null for ", StringMatchType.Contains)
+                }
+            }
+            for (anchor in anchors) {
+                if (!anchor.isMethod) continue
+                val superClass = anchor.getMethodInstance(loader).declaringClass.superclass
+                    ?: continue
+                for (invoke in anchor.invokes) {
+                    val method = invoke.getMethodInstance(loader)
+                    if (method.declaringClass == superClass &&
+                        method.parameterCount == 1 &&
+                        method.parameterTypes[0] == Boolean::class.javaPrimitiveType &&
+                        method.returnType == Void.TYPE
+                    ) {
+                        return@getMethod method
+                    }
+                }
+            }
+            // Fallback anchor: the "statusplaybackvideo/no player for " throw inside
+            // X.C77W.A0G. Its declaring class is the status content class itself, so
+            // scan its declared methods for the single void(boolean) one.
+            val fallback = findFirstMethodUsingStrings(
+                loader,
+                StringMatchType.Contains,
+                "statusplaybackvideo/no player for "
+            ) ?: throw Exception("StatusContent setMuted method not found")
+            for (method in fallback.declaringClass.declaredMethods) {
+                if (method.parameterCount == 1 &&
+                    method.parameterTypes[0] == Boolean::class.javaPrimitiveType &&
+                    method.returnType == Void.TYPE
+                ) {
+                    return@getMethod method
+                }
+            }
+            throw Exception("StatusContent setMuted method not found")
+        }
+    }
+
+    @Throws(Exception::class)
+    @JvmStatic
     fun loadStatusPlaybackViewClass(loader: ClassLoader): Class<*> {
         return UnobfuscatorCache.getInstance().getClass(loader) {
             val ids = listOf(Utils.getID("status_header", "id"), Utils.getID("menu", "id"))
