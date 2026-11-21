@@ -17,6 +17,7 @@ import com.wmods.wppenhacer.xposed.features.customization.SeparateGroup
 import com.wmods.wppenhacer.xposed.features.customization.ShowOnline
 import com.wmods.wppenhacer.xposed.features.customization.StatusBarGradient
 import com.wmods.wppenhacer.xposed.features.general.AboutContactPicker
+import com.wmods.wppenhacer.xposed.features.general.AlwaysPlayStatusWithSound
 import com.wmods.wppenhacer.xposed.features.general.AntiRevoke
 import com.wmods.wppenhacer.xposed.features.general.CallType
 import com.wmods.wppenhacer.xposed.features.general.CaptureDevice
@@ -84,6 +85,7 @@ internal object FeatureRegistry {
         CustomToolbar::class.java,
         CustomView::class.java,
         SeenTick::class.java,
+        AlwaysPlayStatusWithSound::class.java,
         BubbleColors::class.java,
         CallPrivacy::class.java,
         ActivityController::class.java,
