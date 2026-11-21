@@ -521,6 +521,11 @@ object FeatureCatalog {
             R.string.toast_on_viewed_status_sum, SearchableFeature.Category.GENERAL, general,
             null, "toast", "viewed", "status", "notification"
         )
+        add(
+            catalog, context, "always_play_status_with_sound", R.string.always_play_status_with_sound,
+            R.string.always_play_status_with_sound_sum, SearchableFeature.Category.GENERAL, general,
+            null, "sound", "status", "volume", "mute", "audio"
+        )
 
         addPrivacyFeatures(context, catalog, privacy)
         addMediaFeatures(context, catalog, media)
