@@ -37,6 +37,11 @@
             app:summary="@string/toast_on_viewed_status_sum"
             app:title="@string/toast_on_viewed_status" />
 
+        <rikka.material.preference.MaterialSwitchPreference
+            app:key="always_play_status_with_sound"
+            app:summary="@string/always_play_status_with_sound_sum"
+            app:title="@string/always_play_status_with_sound" />
+
 
     </PreferenceCategory>
 
