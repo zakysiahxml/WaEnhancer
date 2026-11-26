@@ -41,6 +41,12 @@
             app:summary="@string/toast_on_viewed_status_sum"
             app:title="@string/toast_on_viewed_status" />
 
+        <rikka.material.preference.MaterialSwitchPreference
+            android:defaultValue="true"
+            app:key="status_expiration_time"
+            app:summary="@string/status_expiration_time_sum"
+            app:title="@string/status_expiration_time" />
+
 
     </PreferenceCategory>
 
