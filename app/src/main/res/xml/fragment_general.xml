@@ -1,7 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<PreferenceScreen xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools"
-    tools:viewBindingIgnore="true">
+<PreferenceScreen xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <Preference
         app:fragment="com.wmods.wppenhacer.ui.fragments.GeneralFragment$HomeGeneralPreference"
@@ -33,14 +32,14 @@
             app:title="@string/enable_copy_status" />
 
         <rikka.material.preference.MaterialSwitchPreference
-            app:key="toast_viewed_status"
-            app:summary="@string/toast_on_viewed_status_sum"
-            app:title="@string/toast_on_viewed_status" />
-
-        <rikka.material.preference.MaterialSwitchPreference
             app:key="always_play_status_with_sound"
             app:summary="@string/always_play_status_with_sound_sum"
             app:title="@string/always_play_status_with_sound" />
+
+        <rikka.material.preference.MaterialSwitchPreference
+            app:key="toast_viewed_status"
+            app:summary="@string/toast_on_viewed_status_sum"
+            app:title="@string/toast_on_viewed_status" />
 
 
     </PreferenceCategory>
