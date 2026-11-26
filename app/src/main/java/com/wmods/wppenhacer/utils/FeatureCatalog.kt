@@ -507,6 +507,11 @@ object FeatureCatalog {
 
         // Status preferences.
         add(
+            catalog, context, "always_play_status_with_sound", R.string.always_play_status_with_sound,
+            R.string.always_play_status_with_sound_sum, SearchableFeature.Category.GENERAL, general,
+            null, "sound", "status", "volume", "mute", "audio"
+        )
+        add(
             catalog, context, "autonext_status", R.string.disable_auto_status,
             R.string.disable_auto_status_sum, SearchableFeature.Category.GENERAL, general,
             null, "auto", "status", "skip"
@@ -520,11 +525,6 @@ object FeatureCatalog {
             catalog, context, "toast_viewed_status", R.string.toast_on_viewed_status,
             R.string.toast_on_viewed_status_sum, SearchableFeature.Category.GENERAL, general,
             null, "toast", "viewed", "status", "notification"
-        )
-        add(
-            catalog, context, "always_play_status_with_sound", R.string.always_play_status_with_sound,
-            R.string.always_play_status_with_sound_sum, SearchableFeature.Category.GENERAL, general,
-            null, "sound", "status", "volume", "mute", "audio"
         )
 
         addPrivacyFeatures(context, catalog, privacy)
